@@ -69,3 +69,25 @@ The tasks are designed to be small, self-contained, and testable. They exercise 
 ## Resetting
 
 Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures.
+
+## E2E Test Run
+
+To run the full end-to-end flow (daemon + leader + worker agent):
+
+```bash
+./run-e2e.sh
+```
+
+This will:
+1. Set up demo fixtures (runs `setup-demo.sh`)
+2. Start the MPT daemon from `../my-pizza-team` source
+3. Launch a Pi leader in a tmux session
+4. Spawn a worker agent pointed at `demo/project/`
+5. Monitor task progress until you Ctrl+C
+
+Prerequisites: `pi`, `deno`, `tmux`, and the `pi-pizza-team` extension installed.
+
+To clean up running processes:
+```bash
+./run-e2e.sh --clean
+```
