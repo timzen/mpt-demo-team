@@ -182,7 +182,10 @@ ok "Story loaded: $STORY_COUNT story, $TASK_COUNT tasks"
 log "Launching Pi leader in tmux..."
 
 # Create tmux session with leader window
+# Note: if tmux-resurrect/continuum is installed, starting the tmux server
+# may trigger session restoration. We add a brief delay to let that settle.
 tmux new-session -d -s "$TMUX_SESSION" -n "leader" -c "$TEAM_DIR"
+sleep 2
 
 # Verify session was created
 if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
