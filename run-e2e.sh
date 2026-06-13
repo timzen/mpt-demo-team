@@ -25,7 +25,7 @@ TEAM_DIR="$DEMO_DIR/team"
 PROJECT_DIR="$DEMO_DIR/project"
 DAEMON_PORT=7437
 DAEMON_URL="http://localhost:$DAEMON_PORT"
-TMUX_SESSION="mpt-e2e"
+TMUX_SESSION="mpt-demo"
 PIDFILE="$TEAM_DIR/.my-pizza-team/daemon.pid"
 
 # ─── Colors ───────────────────────────────────────────────────────────
