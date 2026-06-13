@@ -1,0 +1,3 @@
+# Runtime directories (populated by setup script)
+demo/
+node_modules/

@@ -1,0 +1,19 @@
+{
+  "port": 7437,
+  "defaultWorkflow": "default",
+  "tmuxSession": "mpt-demo",
+  "maxTeammates": 2,
+  "agentTimeoutSeconds": 90,
+  "autosave": {
+    "flushIntervalMinutes": 30,
+    "commitIntervalHours": 24,
+    "commitMessage": "mpt-demo: checkpoint {timestamp}",
+    "autoCommit": false
+  },
+  "leaderUrl": "http://localhost:7437",
+  "categories": ["coding", "testing"],
+  "teammates": {
+    "nouns": ["ripley", "deckard"],
+    "favoriteDirectories": []
+  }
+}

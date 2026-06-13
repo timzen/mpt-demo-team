@@ -1,0 +1,8 @@
+{
+  "states": ["todo", "in_progress", "review", "done"],
+  "transitions": {
+    "todo": { "in_progress": "any" },
+    "in_progress": { "review": "teammate" },
+    "review": { "done": "lead", "in_progress": "lead" }
+  }
+}
