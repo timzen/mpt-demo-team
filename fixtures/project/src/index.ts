@@ -81,8 +81,11 @@ async function handler(req: IncomingMessage, res: ServerResponse) {
 const PORT = Number(process.env.PORT) || 3456;
 const server = createServer(handler);
 
-server.listen(PORT, () => {
-  console.log(`Demo Todo API running on http://localhost:${PORT}`);
-});
+// Only start listening when run directly (not when imported by tests)
+if (process.argv[1]?.endsWith("index.ts") || process.argv[1]?.endsWith("index.js")) {
+  server.listen(PORT, () => {
+    console.log(`Demo Todo API running on http://localhost:${PORT}`);
+  });
+}
 
 export { server, todos, handler };

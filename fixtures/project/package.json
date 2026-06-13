@@ -1,6 +1,7 @@
 {
   "name": "demo-todo-api",
   "version": "1.0.0",
+  "type": "module",
   "description": "A simple todo API for MPT demo",
   "main": "src/index.ts",
   "scripts": {
