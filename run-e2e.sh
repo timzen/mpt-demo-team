@@ -218,38 +218,43 @@ fi
 
 # ─── Spawn Worker Agent ──────────────────────────────────────────────
 
-log "Spawning worker agent in $PROJECT_DIR..."
+log "Requesting worker spawn in $PROJECT_DIR..."
 
-# Request a spawn via the daemon API
+# Create a spawn request — the leader will pick it up and execute it
+# Use the machine's hostname as hostId (matches what the leader registers with)
+HOST_ID=$(hostname)
 SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/spawn-requests" \
   -H "Content-Type: application/json" \
-  -d "{\"hostId\": \"local\", \"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}")
+  -d "{\"hostId\": \"$HOST_ID\", \"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}")
 
 SPAWN_OK=$(echo "$SPAWN_RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
 
-if [ "$SPAWN_OK" = "True" ]; then
-  ok "Spawn request created via API"
-  # The leader polls for spawn requests and executes them.
-  # If leader isn't connected, fall back to direct spawn.
-  sleep 3
-  # Check if a new agent appeared
-  NEW_AGENT_COUNT=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('agents',[])))" 2>/dev/null || echo "0")
-  if [ "$NEW_AGENT_COUNT" -le "${AGENT_COUNT:-0}" ]; then
-    warn "Leader didn't pick up spawn request, spawning directly..."
-    tmux new-window -n "worker" -t "$TMUX_SESSION" -c "$PROJECT_DIR"
-    tmux send-keys -t "$TMUX_SESSION:worker" \
-      "cd $PROJECT_DIR && pi --ppt-worker --ppt-daemon=$DAEMON_URL --ppt-name=ripley" Enter
-    ok "Worker spawned directly in tmux"
-  else
-    ok "Leader spawned the worker"
+if [ "$SPAWN_OK" != "True" ]; then
+  err "Failed to create spawn request"
+  err "Response: $SPAWN_RES"
+  exit 1
+fi
+
+ok "Spawn request created — leader will pick it up"
+
+# Wait for the leader to spawn the worker
+log "Waiting for worker to appear..."
+for i in $(seq 1 30); do
+  CURRENT_AGENTS=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; agents=json.load(sys.stdin).get('agents',[]); print(len([a for a in agents if a['id'] != 'leader']))" 2>/dev/null || echo "0")
+  if [ "$CURRENT_AGENTS" -gt 0 ]; then
+    break
   fi
+  sleep 1
+done
+
+if [ "$CURRENT_AGENTS" -gt 0 ]; then
+  WORKER_NAME=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; agents=json.load(sys.stdin).get('agents',[]); w=[a for a in agents if a['id'] != 'leader']; print(w[0]['name'] if w else 'unknown')" 2>/dev/null || echo "unknown")
+  ok "Worker '$WORKER_NAME' spawned by leader"
 else
-  # Fallback: spawn directly via tmux
-  warn "API spawn request failed, spawning directly via tmux..."
-  tmux new-window -n "worker" -t "$TMUX_SESSION" -c "$PROJECT_DIR"
-  tmux send-keys -t "$TMUX_SESSION:worker" \
-    "cd $PROJECT_DIR && pi --ppt-worker --ppt-daemon=$DAEMON_URL --ppt-name=ripley" Enter
-  ok "Worker spawned directly in tmux"
+  err "Leader didn't spawn a worker within 30s"
+  err "Check: tmux attach -t $TMUX_SESSION"
+  err "Daemon log: $DAEMON_LOG"
+  exit 1
 fi
 
 # ─── Status Summary ──────────────────────────────────────────────────
@@ -265,7 +270,7 @@ echo "  UI:        $DAEMON_URL/"
 echo "  tmux:      tmux attach -t $TMUX_SESSION"
 echo ""
 echo "  Leader:    $TMUX_SESSION:leader (in $TEAM_DIR)"
-echo "  Worker:    spawning in $PROJECT_DIR"
+echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:     'Add User Authentication' (3 tasks)"
 echo "  Workflow:  todo → in_progress → review → done"
