@@ -194,7 +194,7 @@ if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
 fi
 
 tmux send-keys -t "$TMUX_SESSION:leader" \
-  "cd $TEAM_DIR && pi" Enter
+  "pi --ppt-lead --ppt-daemon=$DAEMON_URL" Enter
 
 ok "Pi leader launched in tmux session '$TMUX_SESSION' window 'leader'"
 
