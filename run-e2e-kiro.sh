@@ -210,8 +210,8 @@ ok "Agent name: $WORKER_NAME"
 
 log "Launching Kiro runner in tmux..."
 
-# Create tmux session with the agent window
-tmux new-session -d -s "$TMUX_SESSION" -n "$WORKER_NAME" -c "$PROJECT_DIR"
+# Create tmux session with the runner/leader window
+tmux new-session -d -s "$TMUX_SESSION" -n "runner" -c "$PROJECT_DIR"
 sleep 2
 
 # Verify session was created
@@ -220,13 +220,12 @@ if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   exit 1
 fi
 
-# Launch the Kiro runner with the daemon-generated name
-# The runner orchestrates (poll/claim/release) and spawns kiro-cli
-# in separate tmux windows for each task (visible/watchable)
-tmux send-keys -t "$TMUX_SESSION:$WORKER_NAME" \
+# Launch the Kiro runner (orchestrator: polls, claims, releases)
+# It spawns kiro-cli in a separate tmux window named '$WORKER_NAME' for each task
+tmux send-keys -t "$TMUX_SESSION:runner" \
   "MPT_DAEMON_URL=$DAEMON_URL MPT_AGENT_ID=$WORKER_NAME MPT_WORK_DIR=$PROJECT_DIR MPT_TMUX_SESSION=$TMUX_SESSION node $MCP_SERVER/src/runners/kiro/runner.mjs" Enter
 
-ok "Kiro runner '$WORKER_NAME' launched in tmux session '$TMUX_SESSION'"
+ok "Runner launched in '$TMUX_SESSION:runner' (agent tasks appear as '$WORKER_NAME' window)"
 
 # ─── Status Summary ──────────────────────────────────────────────────
 
@@ -241,7 +240,8 @@ echo "  MCP server:  $MCP_SERVER/src/index.mjs"
 echo "  UI:          $DAEMON_URL/"
 echo "  tmux:        tmux attach -t $TMUX_SESSION"
 echo ""
-echo "  Runner:      $TMUX_SESSION:$WORKER_NAME (in $PROJECT_DIR)"
+echo "  Runner:      $TMUX_SESSION:runner (orchestrator)"
+echo "  Agent:       $TMUX_SESSION:$WORKER_NAME (kiro-cli, visible per task)"
 echo ""
 echo "  Story:       'Add User Authentication' (3 tasks)"
 echo "  Workflow:    todo → in_progress → review → done"
