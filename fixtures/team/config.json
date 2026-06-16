@@ -1,6 +1,5 @@
 {
   "port": 7438,
-  "daemonUrl": "http://localhost:7438",
   "defaultWorkflow": "default",
   "tmuxSession": "mpt-demo",
   "maxTeammates": 2,
@@ -11,7 +10,6 @@
     "commitMessage": "mpt-demo: checkpoint {timestamp}",
     "autoCommit": false
   },
-  "leaderUrl": "http://localhost:7438",
   "categories": ["coding", "testing"],
   "teammates": {
     "nouns": ["ripley", "deckard"],
