@@ -191,10 +191,27 @@ ok "Story loaded: $STORY_COUNT story, $TASK_COUNT tasks"
 
 # ─── Launch Kiro Runner in tmux ───────────────────────────────────────
 
-log "Launching Kiro task runner in tmux..."
+log "Requesting agent name from daemon..."
 
-# Create tmux session
-tmux new-session -d -s "$TMUX_SESSION" -n "kiro-runner" -c "$PROJECT_DIR"
+# Get a proper name from the daemon via spawn request
+SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/spawn-requests" \
+  -H "Content-Type: application/json" \
+  -d "{\"hostId\": \"$(hostname)\", \"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-kiro\"}")
+
+WORKER_NAME=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('request',d).get('name','kiro-worker'))" 2>/dev/null || echo "kiro-worker")
+
+# Ack the spawn request (we're handling it ourselves)
+SPAWN_ID=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('request',d).get('id',''))" 2>/dev/null || echo "")
+if [ -n "$SPAWN_ID" ]; then
+  curl -sf -X POST "$DAEMON_URL/api/spawn-requests/$SPAWN_ID/ack" >/dev/null 2>&1 || true
+fi
+
+ok "Agent name: $WORKER_NAME"
+
+log "Launching Kiro runner in tmux..."
+
+# Create tmux session with the agent window
+tmux new-session -d -s "$TMUX_SESSION" -n "$WORKER_NAME" -c "$PROJECT_DIR"
 sleep 2
 
 # Verify session was created
@@ -203,30 +220,13 @@ if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
   exit 1
 fi
 
-# Launch the Kiro runner (it polls, claims tasks, runs kiro-cli, releases)
-tmux send-keys -t "$TMUX_SESSION:kiro-runner" \
-  "cd $PROJECT_DIR && MPT_DAEMON_URL=$DAEMON_URL MPT_AGENT_ID=kiro-worker-1 MPT_WORK_DIR=$PROJECT_DIR node $MCP_SERVER/src/runners/kiro/runner.mjs" Enter
+# Launch the Kiro runner with the daemon-generated name
+# The runner orchestrates (poll/claim/release) and spawns kiro-cli
+# in separate tmux windows for each task (visible/watchable)
+tmux send-keys -t "$TMUX_SESSION:$WORKER_NAME" \
+  "MPT_DAEMON_URL=$DAEMON_URL MPT_AGENT_ID=$WORKER_NAME MPT_WORK_DIR=$PROJECT_DIR MPT_TMUX_SESSION=$TMUX_SESSION node $MCP_SERVER/src/runners/kiro/runner.mjs" Enter
 
-ok "Kiro runner launched in tmux session '$TMUX_SESSION' window 'kiro-runner'"
-
-# Wait for the runner to register with the daemon
-log "Waiting for Kiro runner to register..."
-for i in $(seq 1 20); do
-  AGENT_COUNT=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('agents',[])))" 2>/dev/null || echo "0")
-  if [ "$AGENT_COUNT" -gt 0 ]; then
-    break
-  fi
-  sleep 1
-done
-
-if [ "$AGENT_COUNT" -gt 0 ]; then
-  WORKER_NAME=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; agents=json.load(sys.stdin).get('agents',[]); print(agents[0]['name'] if agents else 'unknown')" 2>/dev/null || echo "unknown")
-  ok "Runner registered as '$WORKER_NAME'"
-else
-  warn "Runner may not have registered yet (no agents after 20s)"
-  warn "Check: tmux attach -t $TMUX_SESSION"
-  warn "Daemon log: $DAEMON_LOG"
-fi
+ok "Kiro runner '$WORKER_NAME' launched in tmux session '$TMUX_SESSION'"
 
 # ─── Status Summary ──────────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ echo "  MCP server:  $MCP_SERVER/src/index.mjs"
 echo "  UI:          $DAEMON_URL/"
 echo "  tmux:        tmux attach -t $TMUX_SESSION"
 echo ""
-echo "  Runner:      $TMUX_SESSION:kiro-runner (in $PROJECT_DIR)"
+echo "  Runner:      $TMUX_SESSION:$WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:       'Add User Authentication' (3 tasks)"
 echo "  Workflow:    todo → in_progress → review → done"
