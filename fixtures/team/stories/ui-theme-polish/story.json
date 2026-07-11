@@ -1,0 +1,13 @@
+{
+  "id": "ui-theme-polish",
+  "title": "Polish the UI Theme",
+  "description": "Refine the todo app's visual theme: color palette, spacing, and typography. This work is gated on a design review, so the story starts paused, and it requires a teammate with the 'design' capability.",
+  "status": "open",
+  "dependsOn": [],
+  "requirements": {
+    "design": null
+  },
+  "paused": true,
+  "workflow": "default",
+  "categories": ["coding"]
+}

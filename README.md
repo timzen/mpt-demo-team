@@ -26,6 +26,9 @@ mpt-demo-team/
 │       │       ├── 01-auth-module/task.json
 │       │       ├── 02-login-endpoint/task.json
 │       │       └── 03-protected-routes/task.json
+│       ├── stories/ui-theme-polish/   # paused + requires the `design` capability
+│       │   ├── story.json
+│       │   └── tasks/01-color-palette/task.json
 │       └── notes/
 │           └── project-conventions.md
 ├── .gitignore              # Ignores demo/ runtime dir
@@ -65,6 +68,32 @@ TEAM_DIR=./demo/team/.my-pizza-team mpt start
 3. **Protect todo routes** — Auth middleware on all `/todos` endpoints
 
 The tasks are designed to be small, self-contained, and testable. They exercise the full MPT workflow: `todo → in_progress → review → done`.
+
+## Showcasing Capabilities, Requirements, Pause & Work Modes
+
+The fixtures include a second story, **"Polish the UI Theme"** (`ui-theme-polish`),
+that demonstrates the capability-based work matching added in 2026-07:
+
+- It is **paused** (`"paused": true`) — the daemon never hands out its tasks
+  until you un-pause it (in the UI, or `PUT /api/stories/ui-theme-polish` with
+  `{ "paused": false }`).
+- It **requires the `design` capability** (`"requirements": { "design": null }`) —
+  only a teammate that advertises `design` will ever pick it up.
+
+Try it once the daemon is running:
+
+```bash
+# A plain teammate is offered add-user-auth, never the paused/design story:
+pi --ppt-worker
+
+# A design-capable teammate (still blocked until you un-pause the story):
+pi --ppt-worker --ppt-skills=design
+
+# A dedicated agent that works ONE story then dismisses itself:
+pi --ppt-worker --ppt-work-mode=assigned-story --ppt-story=add-user-auth
+```
+
+See my-pizza-team `docs/DESIGN.md` → *Capability-Based Work Matching* for the model.
 
 ## Resetting
 

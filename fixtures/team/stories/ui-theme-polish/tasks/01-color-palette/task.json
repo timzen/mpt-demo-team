@@ -1,0 +1,7 @@
+{
+  "id": "01-color-palette",
+  "title": "Define a cohesive color palette",
+  "description": "Propose a small, accessible color palette (primary, accent, neutral, semantic) and apply it to the todo app's styles. Document the tokens.",
+  "status": "todo",
+  "result": null
+}
