@@ -36,13 +36,14 @@ echo "   ✓ demo/team/.my-pizza-team/ created"
 DEMO_PROJECT_PATH="$SCRIPT_DIR/demo/project"
 TEAM_DIR_PATH="$SCRIPT_DIR/demo/team/.my-pizza-team"
 
-# Update favoriteDirectories in config to point to the real demo project path
+# Seed the recent `directory` capability with the real demo project path so it
+# shows up as a spawn/requirement suggestion in the UI.
 CONFIG_FILE="$TEAM_DIR_PATH/config.json"
 python3 -c "
 import json, sys
 with open('$CONFIG_FILE') as f:
     cfg = json.load(f)
-cfg['teammates']['favoriteDirectories'] = ['$DEMO_PROJECT_PATH']
+cfg.setdefault('recentCapabilities', {})['directory'] = ['$DEMO_PROJECT_PATH']
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\n')

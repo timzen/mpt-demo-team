@@ -12,7 +12,9 @@
   },
   "categories": ["coding", "testing"],
   "teammates": {
-    "nouns": ["ripley", "deckard"],
-    "favoriteDirectories": []
+    "nouns": ["ripley", "deckard"]
+  },
+  "recentCapabilities": {
+    "directory": []
   }
 }
