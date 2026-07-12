@@ -193,17 +193,20 @@ ok "Story loaded: $STORY_COUNT story, $TASK_COUNT tasks"
 
 log "Requesting agent name from daemon..."
 
-# Get a proper name from the daemon via spawn request
-SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/spawn-requests" \
+# Get a proper name from the daemon via a spawn directive (kiro executes the
+# spawn itself, so we immediately mark the directive done).
+HOST_ID=$(hostname)
+SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/hosts/$HOST_ID/leader/directives" \
   -H "Content-Type: application/json" \
-  -d "{\"hostId\": \"$(hostname)\", \"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-kiro\"}")
+  -d "{\"action\": \"spawn\", \"params\": {\"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-kiro\"}}")
 
-WORKER_NAME=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('request',d).get('name','kiro-worker'))" 2>/dev/null || echo "kiro-worker")
+WORKER_NAME=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('directive',{}).get('params',{}).get('name','kiro-worker'))" 2>/dev/null || echo "kiro-worker")
 
-# Ack the spawn request (we're handling it ourselves)
-SPAWN_ID=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('request',d).get('id',''))" 2>/dev/null || echo "")
-if [ -n "$SPAWN_ID" ]; then
-  curl -sf -X POST "$DAEMON_URL/api/spawn-requests/$SPAWN_ID/ack" >/dev/null 2>&1 || true
+# Mark the directive done (we're handling the spawn ourselves)
+DIR_ID=$(echo "$SPAWN_RES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('directive',{}).get('id',''))" 2>/dev/null || echo "")
+if [ -n "$DIR_ID" ]; then
+  curl -sf -X PUT "$DAEMON_URL/api/hosts/$HOST_ID/leader/directives/$DIR_ID" \
+    -H "Content-Type: application/json" -d '{"status": "done"}' >/dev/null 2>&1 || true
 fi
 
 ok "Agent name: $WORKER_NAME"

@@ -220,22 +220,22 @@ fi
 
 log "Requesting worker spawn in $PROJECT_DIR..."
 
-# Create a spawn request — the leader will pick it up and execute it
-# Use the machine's hostname as hostId (matches what the leader registers with)
+# Create a leader directive — the leader polls its host's queue and executes it.
+# Use the machine's hostname as hostId (matches what the leader registers with).
 HOST_ID=$(hostname)
-SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/spawn-requests" \
+SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/hosts/$HOST_ID/leader/directives" \
   -H "Content-Type: application/json" \
-  -d "{\"hostId\": \"$HOST_ID\", \"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}")
+  -d "{\"action\": \"spawn\", \"params\": {\"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}}")
 
 SPAWN_OK=$(echo "$SPAWN_RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
 
 if [ "$SPAWN_OK" != "True" ]; then
-  err "Failed to create spawn request"
+  err "Failed to create spawn directive"
   err "Response: $SPAWN_RES"
   exit 1
 fi
 
-ok "Spawn request created — leader will pick it up"
+ok "Spawn directive created — leader will pick it up"
 
 # Wait for the leader to spawn the worker
 log "Waiting for worker to appear..."
