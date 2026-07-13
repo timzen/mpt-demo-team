@@ -33,11 +33,11 @@ mpt-demo-team/
 │       │   ├── in_progress.md
 │       │   └── review.md
 │       ├── stories/add-user-auth/
-│       │   ├── story.json
-│       │   └── tasks/
-│       │       ├── 01-auth-module/task.json
-│       │       ├── 02-login-endpoint/task.json
-│       │       └── 03-protected-routes/task.json
+│       │   ├── story.json          # taskOrder lists the tasks in order
+│       │   └── tasks/              # dirs are named by task id (identity, not order)
+│       │       ├── add-user-auth-1/task.json
+│       │       ├── add-user-auth-2/task.json
+│       │       └── add-user-auth-3/task.json
 │       └── notes/
 │           └── project-conventions.md
 ├── setup-demo.sh         # Run to (re)create demo/ from fixtures

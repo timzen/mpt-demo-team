@@ -1,5 +1,5 @@
 {
-  "id": "01-auth-module",
+  "id": "add-user-auth-1",
   "title": "Create auth module with password hashing and token generation",
   "description": "Create src/auth.ts with functions: hashPassword(plain) -> hashed, verifyPassword(plain, hashed) -> boolean, generateToken(userId) -> jwt string, verifyToken(token) -> payload | null. Use simple implementations (crypto built-ins, no external deps). Add tests in tests/auth.test.ts.",
   "status": "todo",

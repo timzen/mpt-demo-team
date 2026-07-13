@@ -1,7 +1,0 @@
-{
-  "id": "02-login-endpoint",
-  "title": "Add register and login endpoints",
-  "description": "Add POST /register (accepts {username, password}, stores user, returns 201) and POST /login (accepts {username, password}, returns {token} on success, 401 on failure). Store users in an in-memory Map for now. Wire up the auth module from task 01. Add tests in tests/endpoints.test.ts.",
-  "status": "todo",
-  "result": null
-}
