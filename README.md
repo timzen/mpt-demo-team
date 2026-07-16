@@ -29,7 +29,7 @@ mpt-demo-team/
 │       ├── stories/ui-theme-polish/   # paused + requires the `design` capability
 │       │   ├── story.json
 │       │   └── tasks/ui-theme-polish-1/task.json
-│       └── notes/
+│       └── context/
 │           └── project-conventions.md
 ├── .gitignore              # Ignores demo/ runtime dir
 └── README.md

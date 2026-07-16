@@ -38,7 +38,7 @@ mpt-demo-team/
 │       │       ├── add-user-auth-1/task.json
 │       │       ├── add-user-auth-2/task.json
 │       │       └── add-user-auth-3/task.json
-│       └── notes/
+│       └── context/
 │           └── project-conventions.md
 ├── setup-demo.sh         # Run to (re)create demo/ from fixtures
 ├── .gitignore            # Ignores demo/ runtime directory

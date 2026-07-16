@@ -5,6 +5,6 @@
   "status": "open",
   "dependsOn": [],
   "workflow": "default",
-  "categories": ["coding", "testing"],
+  "context": ["project-conventions"],
   "taskOrder": ["add-user-auth-1", "add-user-auth-2", "add-user-auth-3"]
 }

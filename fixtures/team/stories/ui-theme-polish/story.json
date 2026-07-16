@@ -9,6 +9,5 @@
   },
   "paused": true,
   "workflow": "default",
-  "categories": ["coding"],
   "taskOrder": ["ui-theme-polish-1"]
 }

@@ -1,3 +1,8 @@
+---
+title: Project Conventions
+description: House coding, testing, and API conventions for the demo todo project
+tags: [coding, conventions, testing]
+---
 # Project Conventions
 
 ## Code Style

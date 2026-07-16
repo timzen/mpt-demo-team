@@ -10,7 +10,6 @@
     "commitMessage": "mpt-demo: checkpoint {timestamp}",
     "autoCommit": false
   },
-  "categories": ["coding", "testing"],
   "teammates": {
     "nouns": ["ripley", "deckard"]
   },
