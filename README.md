@@ -17,18 +17,19 @@ mpt-demo-team/
 │       ├── config.json
 │       ├── workflows/default/
 │       │   ├── workflow.json
-│       │   ├── in_progress.md
-│       │   ├── needs_input.md
-│       │   └── review.md
+│       │   └── in_progress.md      # state persona for the one agent state
 │       ├── stories/add-user-auth/
-│       │   ├── story.json          # taskOrder lists the tasks in order
+│       │   ├── story.json          # taskOrder lists the tasks in order; directory = demo project
 │       │   └── tasks/              # dirs are named by task id (identity, not order)
 │       │       ├── add-user-auth-1/task.json
 │       │       ├── add-user-auth-2/task.json
 │       │       └── add-user-auth-3/task.json
-│       ├── stories/ui-theme-polish/   # paused + requires the `design` capability
+│       ├── stories/ui-theme-polish/   # paused (design-review gate)
 │       │   ├── story.json
 │       │   └── tasks/ui-theme-polish-1/task.json
+│       ├── tasks/                  # standalone WorkDefs (Solitary + Scheduled)
+│       │   ├── audit-project-dependencies/workdef.md   # Solitary one-shot
+│       │   └── nightly-test-run/workdef.md             # Scheduled (cron 0 2 * * *)
 │       └── context/
 │           └── project-conventions.md
 ├── .gitignore              # Ignores demo/ runtime dir
@@ -69,31 +70,37 @@ TEAM_DIR=./demo/team/.my-pizza-team mpt start
 
 The tasks are designed to be small, self-contained, and testable. They exercise the full MPT workflow: `todo → in_progress → review → done`.
 
-## Showcasing Capabilities, Requirements, Pause & Work Modes
+## Showcasing Pause, Directory Affinity & Standalone Work
 
-The fixtures include a second story, **"Polish the UI Theme"** (`ui-theme-polish`),
-that demonstrates the capability-based work matching added in 2026-07:
+The fixtures go beyond the board story to exercise the rest of the model:
 
-- It is **paused** (`"paused": true`) — the daemon never hands out its tasks
-  until you un-pause it (in the UI, or `PUT /api/stories/ui-theme-polish` with
-  `{ "paused": false }`).
-- It **requires the `design` capability** (`"requirements": { "design": null }`) —
-  only a teammate that advertises `design` will ever pick it up.
+**A paused story** — **"Polish the UI Theme"** (`ui-theme-polish`) starts
+`"paused": true`, so the daemon never enqueues its tasks until you un-pause it
+(in the UI, or `PUT /api/stories/ui-theme-polish` with `{ "paused": false }`).
+It models a design-review gate.
 
-Try it once the daemon is running:
+**Directory affinity** — both stories set a `directory` (the demo project path,
+filled in by `setup-demo.sh`). Teammates are a flat generalist pool with no
+capabilities or work modes; the daemon simply biases work toward the teammate
+whose working directory matches. Spawn a teammate homed at the demo project and
+it preferentially picks up this work:
 
 ```bash
-# A plain teammate is offered add-user-auth, never the paused/design story:
-pi --ppt-worker
-
-# A design-capable teammate (still blocked until you un-pause the story):
-pi --ppt-worker --ppt-skills=design
-
-# A dedicated agent that works ONE story then dismisses itself:
-pi --ppt-worker --ppt-work-mode=assigned-story --ppt-story=add-user-auth
+# A generalist teammate homed at the demo project (directory affinity):
+pi --ppt-worker            # started with its cwd = demo/project
 ```
 
-See my-pizza-team `docs/DESIGN.md` → *Capability-Based Work Matching* for the model.
+**Standalone WorkDefs** — two jobs that don't live on the board (under
+`team/tasks/`):
+
+- **Solitary** — *Audit project dependencies*. A one-shot: open the **Tasks**
+  page and hit **Run** to enqueue it.
+- **Scheduled** — *Nightly test run* (cron `0 2 * * *`). The daemon enqueues a
+  run each night; the **Schedule** page's **Run now** triggers one immediately.
+
+Completed work (from stories or WorkDefs) shows up in the **Inbox** on the home
+page for review. See my-pizza-team `docs/FRONTIER_ENGINEER_REFACTOR_PLAN.md` for
+the WorkItem/WorkDef model.
 
 ## Resetting
 

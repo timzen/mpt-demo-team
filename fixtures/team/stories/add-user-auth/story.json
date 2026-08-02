@@ -4,6 +4,7 @@
   "description": "Add a basic authentication system to the todo API. Users should be able to register, login, and access protected endpoints with a token.",
   "status": "open",
   "dependsOn": [],
+  "directory": "__DEMO_PROJECT__",
   "workflow": "default",
   "context": ["project-conventions"],
   "taskOrder": ["add-user-auth-1", "add-user-auth-2", "add-user-auth-3"]
