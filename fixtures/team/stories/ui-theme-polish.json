@@ -7,5 +7,7 @@
   "directory": "__DEMO_PROJECT__",
   "paused": true,
   "workflow": "default",
-  "taskOrder": ["ui-theme-polish-1"]
+  "tasks": [
+    { "id": "ui-theme-polish-1", "status": "todo" }
+  ]
 }

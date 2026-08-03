@@ -1,7 +1,0 @@
-{
-  "id": "add-user-auth-3",
-  "title": "Add auth middleware and protect todo endpoints",
-  "description": "Create an auth middleware that checks for Bearer token in Authorization header, verifies it using the auth module, and attaches userId to the request. Apply it to all /todos routes. Unauthenticated requests should get 401. Add tests in tests/middleware.test.ts.",
-  "status": "todo",
-  "result": null
-}

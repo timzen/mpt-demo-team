@@ -7,5 +7,9 @@
   "directory": "__DEMO_PROJECT__",
   "workflow": "default",
   "context": ["project-conventions"],
-  "taskOrder": ["add-user-auth-1", "add-user-auth-2", "add-user-auth-3"]
+  "tasks": [
+    { "id": "add-user-auth-1", "status": "todo" },
+    { "id": "add-user-auth-2", "status": "todo" },
+    { "id": "add-user-auth-3", "status": "todo" }
+  ]
 }

@@ -1,8 +1,8 @@
 ---
 title: Nightly test run
-type: Scheduled
+parentKind: schedule
+parentId: nightly-test-run
 directory: __DEMO_PROJECT__
-cron: "0 2 * * *"
 ---
 ## Goal
 
@@ -11,12 +11,12 @@ the failing output so a human can triage it in the morning.
 
 ## Acceptance Criteria
 
-- The test command is run from the project directory.
-- A pass/fail summary is posted as a completion comment on this work.
-- On failure, the relevant test output is included in the summary.
+- The test command MUST be run from the project directory.
+- A pass/fail summary MUST be posted as a completion comment on this work.
+- On failure, the relevant test output MUST be included in the summary.
 
 ## Additional Context
 
-This is scheduled work: the daemon enqueues a fresh run every night at 2am
-(cron `0 2 * * *`). You can also trigger a run immediately from the Schedule
-page with "Run now".
+This is scheduled work: its Schedule parent (`nightly-test-run`) enqueues a fresh
+run every night at 2am (cron `0 2 * * *`). You can also trigger a run now from
+the Schedule page.

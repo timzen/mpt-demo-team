@@ -13,23 +13,23 @@ mpt-demo-team/
 │   │   ├── tests/          # Basic tests
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── team/               # MPT team directory fixture
+│   └── team/               # MPT team directory fixture (flat; see my-pizza-team docs/WORKDEF_UNIFICATION.md)
 │       ├── config.json
 │       ├── workflows/default/
 │       │   ├── workflow.json
 │       │   └── in_progress.md      # state persona for the one agent state
-│       ├── stories/add-user-auth/
-│       │   ├── story.json          # taskOrder lists the tasks in order; directory = demo project
-│       │   └── tasks/              # dirs are named by task id (identity, not order)
-│       │       ├── add-user-auth-1/task.json
-│       │       ├── add-user-auth-2/task.json
-│       │       └── add-user-auth-3/task.json
-│       ├── stories/ui-theme-polish/   # paused (design-review gate)
-│       │   ├── story.json
-│       │   └── tasks/ui-theme-polish-1/task.json
-│       ├── tasks/                  # standalone WorkDefs (Solitary + Scheduled)
-│       │   ├── audit-project-dependencies/workdef.md   # Solitary one-shot
-│       │   └── nightly-test-run/workdef.md             # Scheduled (cron 0 2 * * *)
+│       ├── stories/               # flat story files (children live in tasks/)
+│       │   ├── add-user-auth.json      # tasks: [{id,status}]; directory = demo project
+│       │   └── ui-theme-polish.json    # paused (design-review gate)
+│       ├── tasks/                 # EVERY unit of work is a WorkDef (authored markdown)
+│       │   ├── add-user-auth-1/workdef.md     # board task (parent: story add-user-auth)
+│       │   ├── add-user-auth-2/workdef.md
+│       │   ├── add-user-auth-3/workdef.md
+│       │   ├── ui-theme-polish-1/workdef.md
+│       │   ├── audit-project-dependencies/workdef.md  # Solitary (no parent)
+│       │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule)
+│       ├── schedules/             # cron parents (fire their child WorkDefs)
+│       │   └── nightly-test-run.json                  # cron 0 2 * * *
 │       └── context/
 │           └── project-conventions.md
 ├── .gitignore              # Ignores demo/ runtime dir
