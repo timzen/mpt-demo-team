@@ -106,6 +106,22 @@ the WorkItem/WorkDef model.
 
 Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures.
 
+## Just the UI (no agents)
+
+To browse the seeded board / tasks / schedule without spawning any agents, use
+`run-ui.sh`. It sets up the fixtures and starts the daemon from `../my-pizza-team`
+source in the foreground — no leader, no worker:
+
+```bash
+./run-ui.sh          # set up fixtures + start the daemon (Ctrl+C to stop)
+./run-ui.sh --clean  # stop a daemon started by this script
+```
+
+Then open <http://localhost:7437/> (Board · Tasks · Schedule). Override the port
+with `PORT=8080 ./run-ui.sh`.
+
+Prerequisites: `deno` only (the UI is served prebuilt from `my-pizza-team/ui/dist`).
+
 ## E2E Test Run
 
 To run the full end-to-end flow (daemon + leader + worker agent):
