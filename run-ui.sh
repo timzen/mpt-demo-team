@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MPT_SOURCE="$SCRIPT_DIR/../my-pizza-team"
 DEMO_DIR="$SCRIPT_DIR/demo"
 TEAM_DIR="$DEMO_DIR/team/.my-pizza-team"
-DAEMON_PORT="${PORT:-7437}"
+DAEMON_PORT="${PORT:-6789}"
 DAEMON_URL="http://localhost:$DAEMON_PORT"
 
 # ─── Colors ───────────────────────────────────────────────────────────
@@ -104,5 +104,5 @@ echo ""
 # my-pizza-team/ui/dist (resolved relative to the daemon's main module).
 cd "$MPT_SOURCE"
 exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" \
-  deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-run \
+  deno run --allow-net --allow-read --allow-write --allow-env --allow-run \
   daemon/main.ts

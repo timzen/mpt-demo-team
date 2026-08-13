@@ -139,7 +139,7 @@ log "Starting MPT daemon on port $DAEMON_PORT..."
 DAEMON_LOG="$DEMO_DIR/daemon.log"
 cd "$MPT_SOURCE"
 TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
-  deno run --allow-net --allow-read --allow-write --allow-env --allow-ffi --allow-run \
+  deno run --allow-net --allow-read --allow-write --allow-env --allow-run \
   daemon/main.ts > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 cd "$SCRIPT_DIR"
