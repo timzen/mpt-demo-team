@@ -1,5 +1,5 @@
 {
-  "port": 7438,
+  "port": 6789,
   "defaultWorkflow": "default",
   "tmuxSession": "mpt-demo",
   "maxTeammates": 2,
