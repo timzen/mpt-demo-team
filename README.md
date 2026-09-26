@@ -137,7 +137,7 @@ This will:
 4. Spawn a worker agent pointed at `demo/project/`
 5. Monitor task progress until you Ctrl+C
 
-Prerequisites: `pi`, `deno`, `tmux`, and the `pi-pizza-team` extension installed.
+Prerequisites: `pi`, `deno`, `tmux`, and the Pi extension installed (`mpt setup`).
 
 To clean up running processes:
 ```bash

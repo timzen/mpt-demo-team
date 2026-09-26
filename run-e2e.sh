@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - `pi` installed globally (npm i -g @earendil-works/pi-coding-agent)
-#   - `pi-pizza-team` extension installed (pi install /path/to/pi-pizza-team)
+#   - the Pi extension installed (`mpt setup`, or `pi install /path/to/my-pizza-team/harnesses/pi`)
 #   - `deno` available (for running the daemon from source)
 #   - `tmux` available (for agent spawning)
 #
