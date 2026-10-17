@@ -177,6 +177,28 @@ fi
 
 ok "Story loaded: $STORY_COUNT story, $TASK_COUNT tasks"
 
+# ─── Draft WorkDefs ──────────────────────────────────────────────────
+#
+# A draft must never be enqueued, stays editable until published, and is locked
+# afterwards (my-pizza-team docs/DESIGN.md "Drafts: Write, Review, Publish").
+# Published with enqueue:false and then deleted, so it doesn't add work to the demo.
+
+log "Checking draft → publish..."
+json_field() { python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
+http_code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
+DRAFT_ID=$(curl -sf -X POST "$DAEMON_URL/api/work-defs" -H "Content-Type: application/json" \
+  -d '{"title":"E2E draft check","goal":"never runs","draft":true}' | json_field "d['workDef']['id']")
+draft_items() {
+  curl -sf "$DAEMON_URL/api/work-items" | python3 -c "import sys,json; print(len([i for i in json.load(sys.stdin)['items'] if i['ref']['workDefId']=='$DRAFT_ID']))"
+}
+[ "$(draft_items)" -eq 0 ] || { err "Draft $DRAFT_ID was enqueued"; exit 1; }
+[ "$(http_code -X POST "$DAEMON_URL/api/work-defs/$DRAFT_ID/enqueue")" = "409" ] || { err "Run on a draft wasn't refused"; exit 1; }
+[ "$(http_code -X PUT "$DAEMON_URL/api/work-defs/$DRAFT_ID" -H "Content-Type: application/json" -d '{"goal":"edited"}')" = "200" ] || { err "Editing a draft failed"; exit 1; }
+[ "$(http_code -X POST "$DAEMON_URL/api/work-defs/$DRAFT_ID/publish" -H "Content-Type: application/json" -d '{"enqueue":false}')" = "200" ] || { err "Publish failed"; exit 1; }
+[ "$(http_code -X PUT "$DAEMON_URL/api/work-defs/$DRAFT_ID" -H "Content-Type: application/json" -d '{"goal":"too late"}')" = "409" ] || { err "Published WorkDef was still editable"; exit 1; }
+curl -sf -X DELETE "$DAEMON_URL/api/work-defs/$DRAFT_ID" >/dev/null
+ok "Drafts: not enqueued, editable, locked once published"
+
 # ─── Launch Pi Leader ─────────────────────────────────────────────────
 
 log "Launching Pi leader in tmux..."
@@ -220,10 +242,9 @@ fi
 
 log "Requesting worker spawn in $PROJECT_DIR..."
 
-# Create a leader directive — the leader polls its host's queue and executes it.
-# Use the machine's hostname as hostId (matches what the leader registers with).
-HOST_ID=$(hostname)
-SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/hosts/$HOST_ID/leader/directives" \
+# Create a leader directive — the daemon (or, without tmux access, the leader)
+# realizes it. There is one leader, so the queue isn't keyed by host.
+SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/leader/directives" \
   -H "Content-Type: application/json" \
   -d "{\"action\": \"spawn\", \"params\": {\"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}}")
 
