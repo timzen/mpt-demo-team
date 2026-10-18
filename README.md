@@ -20,7 +20,7 @@ mpt-demo-team/
 │       │   └── in_progress.md      # state persona for the one agent state
 │       ├── stories/               # flat story files (children live in tasks/)
 │       │   ├── add-user-auth.json      # tasks: [{id,status}]; directory = demo project
-│       │   └── ui-theme-polish.json    # paused (design-review gate)
+│       │   └── ui-theme-polish.json    # pending (design-review gate)
 │       ├── tasks/                 # EVERY unit of work is a WorkDef (authored markdown)
 │       │   ├── add-user-auth-1/workdef.md     # board task (parent: story add-user-auth)
 │       │   ├── add-user-auth-2/workdef.md
@@ -74,10 +74,10 @@ The tasks are designed to be small, self-contained, and testable. They exercise 
 
 The fixtures go beyond the board story to exercise the rest of the model:
 
-**A paused story** — **"Polish the UI Theme"** (`ui-theme-polish`) starts
-`"paused": true`, so the daemon never enqueues its tasks until you un-pause it
-(in the UI, or `PUT /api/stories/ui-theme-polish` with `{ "paused": false }`).
-It models a design-review gate.
+**A pending story** — **"Polish the UI Theme"** (`ui-theme-polish`) starts
+`"pending": true`, so the daemon hands out none of its tasks until you activate it
+(**Activate** on the Board's Pending tab or the story page, or `POST
+/api/stories/ui-theme-polish/activate`). It models a design-review gate.
 
 **Directory affinity** — both stories set a `directory` (the demo project path,
 filled in by `setup-demo.sh`). Teammates are a flat generalist pool with no
