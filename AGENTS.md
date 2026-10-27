@@ -44,8 +44,12 @@ mpt-demo-team/
 │   └── tracker/tracker.json  # Seed issues for the demo-tracker plugin (DEMO-3 is triage-mode)
 ├── plugins/
 │   └── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, README)
-├── setup-demo.sh         # Run to (re)create demo/ from fixtures
-├── .gitignore            # Ignores demo/ runtime directory
+├── plugins.local.example.json    # Example plugin overlay (plugins.local.json is gitignored)
+├── setup-demo.sh         # Run to (re)create demo/ from fixtures (+ merges plugins.local.json)
+├── try-plugin.sh         # mpt plugins doctor → plugins.local.json → setup → run-ui.sh
+├── run-ui.sh             # Daemon only, no agents (--restart, --clean); prints plugin statuses
+├── run-e2e.sh            # Full e2e run (ignores plugins.local.json)
+├── .gitignore            # Ignores demo/ runtime directory and plugins.local.json
 └── README.md
 ```
 
@@ -95,6 +99,30 @@ Keep the plugin plain JavaScript (no build step), small, and well commented — 
 a teaching example. Plugins load at daemon startup, so restart after changing it.
 The daemon runs under **Node** (`node daemon/main.ts`): the plugin loader needs
 Node's module hooks.
+
+### Trying your own plugins (the sandbox)
+
+`plugins.local.json` (gitignored, at the repo root) is a JSON array of config.json
+`packages` entries — a spec string or `{ source, config }`; relative local paths
+are relative to the repo, `~/` and absolute work too; `{ "//": "…" }` entries are
+comments. `setup-demo.sh` merges it into `demo/team/.my-pizza-team/config.json`
+after copying the fixtures (paths made absolute; deduped by package, local
+entries winning; the demo-tracker entry kept otherwise) and skips it when
+`MPT_DEMO_NO_LOCAL_PLUGINS=1`, which `run-e2e.sh` sets so e2e stays deterministic.
+`plugins.local.example.json` shows MPTSimWorkSources with placeholder config.
+
+- Workflow: build the plugin (`brazil-build` for Brazil packages) →
+  `./try-plugin.sh <path> --config '<json>'` (runs `mpt plugins doctor` from
+  `../my-pizza-team` source and stops on failure, records the entry, runs setup,
+  starts `run-ui.sh --restart`; `--no-start`, `--list`, `--remove`) → browse the
+  Work tab → after a rebuild, `./run-ui.sh --restart`.
+- `run-ui.sh` starts no agents. With agents, teammates work in `demo/project`
+  unless the plugin config sets `directory`.
+- Real external data is mirrored only into the gitignored `demo/`.
+- Graduate a plugin with `mpt plugins doctor` + `mpt plugins add <path> --config …`
+  in the real team, then restart its daemon. README "Trying your own plugins" has the details.
+- Never commit a `plugins.local.json`, and keep real group names / logins out of
+  the example (placeholders only). The scripts write nothing outside this repo.
 
 ## While Working
 

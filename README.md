@@ -36,7 +36,11 @@ mpt-demo-team/
 │       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2; DEMO-3 triage-mode)
 ├── plugins/
 │   └── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build)
-├── .gitignore              # Ignores demo/ runtime dir
+├── plugins.local.example.json     # Example overlay for your own plugins (see "Trying your own plugins")
+├── try-plugin.sh           # Doctor a plugin, add it to plugins.local.json, bring the sandbox up
+├── run-ui.sh               # Daemon only (no agents); --restart, --clean
+├── run-e2e.sh              # Full end-to-end run (daemon + leader + worker)
+├── .gitignore              # Ignores demo/ runtime dir and plugins.local.json
 └── README.md
 ```
 
@@ -148,9 +152,77 @@ How to watch it:
 Plugins load at daemon startup, so a change to the plugin code or its `packages`
 entry needs a daemon restart (the tracker file itself doesn't).
 
+## Trying your own plugins
+
+The demo team doubles as a **plugin sandbox**: try any Work Source plugin package
+(e.g. `~/ws/MPT/src/MPTSimWorkSources`, or one you're writing) against a
+throwaway team before it goes into a real one — without committing your personal
+config, and without losing it when the demo resets.
+
+Your plugins live in **`plugins.local.json`** (gitignored): a JSON array of
+entries in the same format as config.json `packages` — a spec string, or
+`{ "source": "<path|spec>", "config": { … } }`. Local paths may be absolute or
+`~/`; relative ones are relative to this repo. `setup-demo.sh` (so also
+`run-ui.sh`) merges it into `demo/team/.my-pizza-team/config.json` on every
+setup: paths are made absolute, an entry for the same package as a fixture entry
+replaces it (otherwise the demo-tracker stays), `__DEMO_PROJECT__` in a config is
+filled in, and bad JSON stops the setup with an error. Entries with only a `"//"`
+key are comments. See `plugins.local.example.json` (MPTSimWorkSources with
+placeholders) — copy it, or let `try-plugin.sh` write the file for you.
+
+**The workflow:**
+
+```bash
+# 1. Build the plugin (Brazil packages: brazil-build, never plain npm)
+(cd ~/ws/MPT/src/MPTSimWorkSources && brazil-build)
+
+# 2. Check it and bring the sandbox up: mpt plugins doctor (+ one live
+#    init/sync with --config), record it in plugins.local.json, setup, run-ui
+./try-plugin.sh ~/ws/MPT/src/MPTSimWorkSources \
+  --config '{"taskei":{"workflowStep":"Implementation","dryRun":false,"maxItems":3}}'
+
+# 3. Browse http://localhost:6789/work — a tab per source. run-ui.sh prints
+#    each plugin's load status (✓ / ✗ with the error) and its sources.
+
+# 4. After a rebuild, restart the daemon (re-runs setup, keeps plugins.local.json)
+(cd ~/ws/MPT/src/MPTSimWorkSources && brazil-build) && ./run-ui.sh --restart
+```
+
+- `./try-plugin.sh <path|spec> [--config '<json>'] [--no-start]` — stops if the
+  doctor fails (plugins.local.json unchanged). Without `--config` an entry's
+  existing config is kept. `--no-start` sets up without starting the daemon.
+- `./try-plugin.sh --list` shows the entries; `./try-plugin.sh --remove <path|spec>`
+  removes one (then `./run-ui.sh --restart`). `./try-plugin.sh --help` for the rest.
+- Relative paths *inside* a config are up to the plugin: the daemon passes the
+  team dir (`demo/team/.my-pizza-team`), the doctor a temp dir — so prefer
+  absolute ones (e.g. the demo-tracker's `file`).
+- `run-e2e.sh` ignores plugins.local.json (it runs setup with
+  `MPT_DEMO_NO_LOCAL_PLUGINS=1`), so e2e stays deterministic.
+
+**UI only vs with agents.** `run-ui.sh` starts no teammates: you see what the
+plugin mirrors and enqueues, and can comment / cancel / Sync now, but nothing
+runs. To have work done, run `run-e2e.sh`-style agents (or `pi --ppt-worker`)
+against the sandbox daemon. Teammates then work in the demo project
+(`demo/project`) unless the plugin's config sets a `directory` — set one only
+if you mean real work to happen in that checkout. Keep `dryRun` / `maxItems`
+small, and remember write-back hooks (comments, done/failed) reach the real
+system if your plugin does real write-back.
+
+**Where the data goes.** Items from a real external system (Taskei tasks, SIM
+tickets, …) are mirrored only into the gitignored `demo/` (the demo team dir);
+nothing lands in this repo, and `setup-demo.sh` / `--restart` wipe it.
+
+**Graduating to a real team.** Once it behaves here, add it to the real team
+the same way, from that team's directory:
+`mpt plugins doctor <path> --config '<json>'`, then
+`mpt plugins add <path> --config '<json>'` (or edit its config.json `packages`),
+and restart that team's daemon. Drop the sandbox-only bits (a `directory` under
+`demo/`, tiny `maxItems`), and remove the entry here if you like.
+
 ## Resetting
 
-Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures.
+Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures
+(and re-merges `plugins.local.json`, which lives outside `demo/`).
 
 ## Just the UI (no agents)
 
@@ -159,9 +231,13 @@ To browse the seeded board / tasks / schedule without spawning any agents, use
 source in the foreground — no leader, no worker:
 
 ```bash
-./run-ui.sh          # set up fixtures + start the daemon (Ctrl+C to stop)
-./run-ui.sh --clean  # stop a daemon started by this script
+./run-ui.sh            # set up fixtures + start the daemon (Ctrl+C to stop)
+./run-ui.sh --restart  # stop the running daemon, re-run setup, start again
+./run-ui.sh --clean    # stop a daemon started by this script
 ```
+
+Once the daemon is healthy it prints each plugin package's load status and its
+sources (from `GET /api/work-sources`): ✓, or ✗ with the error.
 
 Then open <http://localhost:7437/> (Board · Tasks · Schedule). Override the port
 with `PORT=8080 ./run-ui.sh`.

@@ -10,8 +10,14 @@
 #   - `node` 24+ available (runs the daemon from source; plugins need Node's module hooks)
 #
 # Usage:
-#   ./run-ui.sh          # Set up fixtures + start the daemon (Ctrl+C to stop)
-#   ./run-ui.sh --clean  # Stop a running daemon and exit
+#   ./run-ui.sh            # Set up fixtures + start the daemon (Ctrl+C to stop)
+#   ./run-ui.sh --restart  # Stop a running daemon, then set up + start again
+#                          # (the plugin rebuild loop: build the plugin, then this)
+#   ./run-ui.sh --clean    # Stop a running daemon and exit
+#
+# Once the daemon is healthy it prints each plugin package's load status and
+# its sources (GET /api/work-sources) — the demo-tracker plus anything in
+# plugins.local.json (see ./try-plugin.sh).
 #
 
 set -euo pipefail
@@ -48,10 +54,20 @@ cleanup() {
   fi
 }
 
-if [ "${1:-}" = "--clean" ]; then
-  cleanup
-  exit 0
-fi
+case "${1:-}" in
+  --clean) cleanup; exit 0 ;;
+  --restart)
+    cleanup
+    # Wait (up to 10s) for the port to be released before starting again.
+    for i in $(seq 1 20); do
+      lsof -ti :"$DAEMON_PORT" >/dev/null 2>&1 || break
+      sleep 0.5
+    done
+    ;;
+  "") ;;
+  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) err "Unknown option $1 (try --restart or --clean)"; exit 1 ;;
+esac
 
 # ─── Preflight ────────────────────────────────────────────────────────
 
@@ -83,10 +99,52 @@ log "Setting up demo fixtures..."
 "$SCRIPT_DIR/setup-demo.sh" > /dev/null
 ok "Demo fixtures in place ($TEAM_DIR)"
 
-# ─── Start Daemon (foreground) ───────────────────────────────────────
+# ─── Start Daemon ─────────────────────────────────────────────────────
+
+# In the background (output still goes to this terminal) so the plugin
+# statuses can be printed once it's healthy; Ctrl+C / --clean / --restart
+# stop it. The UI is served from my-pizza-team/ui/dist (resolved relative to
+# the daemon's main module).
+log "Starting daemon on port $DAEMON_PORT..."
+(cd "$MPT_SOURCE" && exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" node daemon/main.ts) &
+DAEMON_PID=$!
+stop_daemon() { kill "$DAEMON_PID" 2>/dev/null || true; wait "$DAEMON_PID" 2>/dev/null || true; }
+trap 'stop_daemon; exit 130' INT TERM
+
+for i in $(seq 1 60); do
+  curl -sf "$DAEMON_URL/health" >/dev/null 2>&1 && break
+  if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    err "Daemon exited during startup (see its output above)"
+    exit 1
+  fi
+  sleep 0.5
+done
+if ! curl -sf "$DAEMON_URL/health" >/dev/null 2>&1; then
+  err "Daemon didn't become healthy within 30s"
+  stop_daemon
+  exit 1
+fi
+
+# ─── Plugin statuses ──────────────────────────────────────────────────
 
 echo ""
-ok "Starting daemon — open ${DAEMON_URL}/ in your browser"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Plugins (GET /api/work-sources)"
+echo ""
+curl -sf "$DAEMON_URL/api/work-sources" | node -e '
+let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+  const { plugins = [], sources = [] } = JSON.parse(s);
+  const label = new Map(sources.map((x) => [x.id, x.label]));
+  if (!plugins.length) console.log("  (no plugin packages configured)");
+  for (const p of plugins) {
+    const srcs = p.sources.map((id) => label.get(id) && label.get(id) !== id ? `${id} ("${label.get(id)}")` : id).join(", ") || "no sources";
+    if (p.state === "loaded") console.log(`  \x1b[0;32m✓\x1b[0m ${p.spec} — ${srcs}`);
+    else console.log(`  \x1b[0;31m✗\x1b[0m ${p.spec} — ${p.error}${p.sources.length ? ` (still registered: ${srcs})` : ""}`);
+  }
+});' || warn "Couldn't read $DAEMON_URL/api/work-sources"
+
+echo ""
+ok "Daemon running (PID $DAEMON_PID) — open ${DAEMON_URL}/ in your browser"
 echo ""
 echo "  Board:     ${DAEMON_URL}/board"
 echo "  Tasks:     ${DAEMON_URL}/tasks"
@@ -97,12 +155,11 @@ echo "  Theme' story, plus Solitary + Scheduled standalone WorkDefs, and the"
 echo "  demo-tracker plugin's 2 issues (Work → Demo Tracker; edit"
 echo "  $DEMO_DIR/tracker/tracker.json to re-sync)."
 echo ""
-echo "  Ctrl+C to stop."
+echo "  Ctrl+C to stop. After rebuilding a plugin: ./run-ui.sh --restart"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# Run in the foreground so Ctrl+C stops it directly. The UI is served from
-# my-pizza-team/ui/dist (resolved relative to the daemon's main module).
-cd "$MPT_SOURCE"
-exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" node daemon/main.ts
+# Stay in the foreground until the daemon exits (Ctrl+C here, or --clean /
+# --restart from another terminal).
+wait "$DAEMON_PID" || true

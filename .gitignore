@@ -1,3 +1,6 @@
 # Runtime directories (populated by setup script)
 demo/
 node_modules/
+
+# Your own plugins to try in the sandbox (see README "Trying your own plugins")
+plugins.local.json

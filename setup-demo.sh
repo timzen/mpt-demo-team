@@ -8,7 +8,8 @@
 #   ./demo/tracker/tracker.json  — The demo-tracker plugin's fake issue tracker
 #
 # The team's config.json loads the example plugin in place from
-# ./plugins/mpt-source-demo-tracker (a relative local path, no install step).
+# ./plugins/mpt-source-demo-tracker (a relative local path, no install step),
+# plus any entries in ./plugins.local.json (your own plugins; gitignored).
 #
 # Both live under ./demo/ which is .gitignored so you can freely experiment.
 #
@@ -40,6 +41,54 @@ echo "   ✓ demo/team/.my-pizza-team/ created"
 echo "📁 Setting up the demo tracker..."
 cp -R "$FIXTURES_DIR/tracker" "$SCRIPT_DIR/demo/tracker"
 echo "   ✓ demo/tracker/tracker.json created (3 open issues, 1 triage-mode)"
+
+# --- Merge the local plugin overlay (plugins.local.json, gitignored) ---
+#
+# plugins.local.json is a JSON array of config.json `packages` entries (a spec
+# string, or { source, config }) — your own plugins to try in the sandbox (see
+# README "Trying your own plugins", ./try-plugin.sh). Relative local paths are
+# relative to this repo; they (and ~/ paths) are made absolute so they work from
+# the team dir. An entry with the same package as a fixture entry replaces it.
+# Entries like { "//": "..." } are comments and skipped. Merged before the
+# __DEMO_PROJECT__ substitution below, so a local config may use it too.
+# run-e2e.sh sets MPT_DEMO_NO_LOCAL_PLUGINS=1 to keep e2e deterministic.
+LOCAL_PLUGINS="$SCRIPT_DIR/plugins.local.json"
+if [ -f "$LOCAL_PLUGINS" ] && [ "${MPT_DEMO_NO_LOCAL_PLUGINS:-}" != "1" ]; then
+  echo "📁 Merging plugins.local.json..."
+  node -e '
+const fs = require("fs"), path = require("path"), os = require("os");
+const [file, configFile, repo] = process.argv.slice(1);
+const teamDir = path.dirname(configFile);
+const fail = (m) => { console.error(`✗ ${file}: ${m}`); process.exit(1); };
+let local;
+try { local = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { fail(`not valid JSON: ${e.message}`); }
+if (!Array.isArray(local)) fail("expected a JSON array of package entries (a spec string, or { \"source\": ..., \"config\": {...} })");
+const isLocal = (s) => path.isAbsolute(s) || s === "." || s === ".." || s === "~" || /^(\.\.?|~)\//.test(s);
+const abs = (s, base) => s === "~" || s.startsWith("~/") ? path.join(os.homedir(), s.slice(1)) : path.resolve(base, s);
+const sourceOf = (e) => typeof e === "string" ? e : e && e.source;
+const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+const key = (s, base) => isLocal(s) ? real(abs(s, base)) : s;
+const entries = [];
+local.forEach((e, i) => {
+  if (e && typeof e === "object" && !Array.isArray(e) && "//" in e && !("source" in e)) return;
+  const s = sourceOf(e);
+  if (typeof s !== "string" || !s.trim()) fail(`entry ${i} needs a spec string or { "source": "<path|spec>", "config": {...} } (got ${JSON.stringify(e)})`);
+  if (typeof e === "object" && e.config !== undefined && (typeof e.config !== "object" || e.config === null || Array.isArray(e.config))) fail(`entry ${i} (${s}): "config" must be an object`);
+  const source = isLocal(s) ? abs(s, repo) : s;
+  if (typeof e === "string") entries.push(source);
+  else { const { "//": _c, ...rest } = e; entries.push({ ...rest, source }); }
+});
+const cfg = JSON.parse(fs.readFileSync(configFile, "utf8"));
+const keys = new Set(entries.map((e) => key(sourceOf(e), repo)));
+const kept = (cfg.packages || []).filter((e) => typeof sourceOf(e) !== "string" || !keys.has(key(sourceOf(e), teamDir)));
+const seen = new Set();
+const merged = entries.filter((e) => { const k = key(sourceOf(e), repo); if (seen.has(k)) return false; seen.add(k); return true; });
+cfg.packages = [...kept, ...merged];
+fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2) + "\n");
+if (!merged.length) console.log("   (no entries)");
+for (const e of merged) console.log(`   ✓ ${sourceOf(e)}${typeof e === "object" && e.config ? " " + JSON.stringify(e.config) : ""}`);
+' "$LOCAL_PLUGINS" "$SCRIPT_DIR/demo/team/.my-pizza-team/config.json" "$SCRIPT_DIR"
+fi
 
 # --- Patch fixtures with the real demo project path ---
 DEMO_PROJECT_PATH="$SCRIPT_DIR/demo/project"

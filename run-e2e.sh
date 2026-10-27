@@ -129,7 +129,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 log "Setting up demo fixtures..."
-"$SCRIPT_DIR/setup-demo.sh" > /dev/null
+# Without plugins.local.json (your own plugins; see ./try-plugin.sh), so e2e
+# runs against the fixtures only and stays deterministic.
+MPT_DEMO_NO_LOCAL_PLUGINS=1 "$SCRIPT_DIR/setup-demo.sh" > /dev/null
 ok "Demo fixtures in place"
 
 # ─── Start Daemon ────────────────────────────────────────────────────
