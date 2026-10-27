@@ -33,7 +33,7 @@ mpt-demo-team/
 │   │   └── context/
 │   │       └── project-conventions.md
 │   └── tracker/
-│       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2)
+│       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2; DEMO-3 triage-mode)
 ├── plugins/
 │   └── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build)
 ├── .gitignore              # Ignores demo/ runtime dir
@@ -122,6 +122,17 @@ titles". Write-back goes the other way: comments on an issue's thread are
 appended to its `comments`, and a finished run marks it `done` / `failed` (a
 canceled run just leaves a note).
 
+**Triage mode.** The third seed issue, **DEMO-3** "Customer request: due dates
+and overdue reminders", has `"mode": "triage"`: it's a vague request to *think
+about*, not work to do. Instead of working it, a teammate **triages** it — the same
+flow as a note's Auto Triage — and proposes tasks, stories, or schedules. Its row on
+the Demo Tracker tab wears a triage badge; its page opens on a **Triage** tab with
+the issue read-only and each proposal's **Accept / Edit / Reject**. Accepting
+creates the work without starting it, and a finished triage leaves the issue open.
+To answer a question, edit the issue's `body` and bump its `updatedAt` — the next
+revision is triaged again. (`"mode"` on an issue, or the plugin's `mode` option
+for all of them; see the plugin's README.)
+
 How to watch it:
 
 - **UI:** Work → **Demo Tracker** tab (`/work/source/demo-tracker`): each issue,
@@ -168,8 +179,11 @@ To run the full end-to-end flow (daemon + leader + worker agent):
 This will:
 1. Set up demo fixtures (runs `setup-demo.sh`)
 2. Start the MPT daemon from `../my-pizza-team` source
-3. Check the demo-tracker plugin: loaded, both issues mirrored and enqueued, and
-   write-back (a thread comment, a canceled run) lands in `demo/tracker/tracker.json`
+3. Check the demo-tracker plugin: loaded, all three issues mirrored and enqueued, and
+   write-back (a thread comment, a canceled run) lands in `demo/tracker/tracker.json`;
+   then play a teammate on the triage-mode **DEMO-3** through the agent API (triage
+   prompt, a `propose_work`-style analysis, COMPLETE), accept its proposal (a task is
+   created, not run; the issue stays open), and re-queue it with Triage now
 4. Launch a Pi leader in a tmux session
 5. Spawn a worker agent pointed at `demo/project/`
 6. Monitor task progress (and the tracker issues' statuses) until you Ctrl+C

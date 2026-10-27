@@ -41,7 +41,7 @@ mpt-demo-team/
 │       │       └── add-user-auth-3/task.json
 │       └── context/
 │           └── project-conventions.md
-│   └── tracker/tracker.json  # Seed issues for the demo-tracker plugin
+│   └── tracker/tracker.json  # Seed issues for the demo-tracker plugin (DEMO-3 is triage-mode)
 ├── plugins/
 │   └── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, README)
 ├── setup-demo.sh         # Run to (re)create demo/ from fixtures
@@ -81,9 +81,15 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
 
 - `sync` mirrors the tracker's **open** issues (revision = `updatedAt`), one run per revision
 - `onComment` appends to the issue's `comments`; `onItemTerminal` marks it `done` / `failed` (CANCELED: a note)
+- **Triage mode:** an issue's `"mode": "triage"` (or the plugin option `mode`) is
+  reported as `ExternalDef.mode` / `WorkSource.mode`; MPT triages it (proposals
+  accepted/rejected on its Triage tab) instead of working it, and `onItemTerminal`
+  never closes a triage-mode issue. Seed issue **DEMO-3** is the example.
 - Watch it: Work → **Demo Tracker** tab, `mpt plugins list` (from `demo/team`),
   `GET /api/work-sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
-- `run-e2e.sh` checks it loaded, mirrored + enqueued both issues, and that write-back reaches the file
+- `run-e2e.sh` checks it loaded, mirrored + enqueued all three issues, that write-back reaches
+  the file, and DEMO-3's triage end to end through the API (claim → triage prompt →
+  `/proposals` → COMPLETE → accept creates a task that never runs → Triage now)
 
 Keep the plugin plain JavaScript (no build step), small, and well commented — it's
 a teaching example. Plugins load at daemon startup, so restart after changing it.

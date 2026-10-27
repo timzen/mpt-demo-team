@@ -205,6 +205,7 @@ ok "Pending: not enqueued, editable, locked once activated"
 # it loaded, that its open issues were mirrored and enqueued, and that write-back
 # reaches the tracker file: a thread comment, and a canceled run's outcome. The
 # canceled issue is re-run afterwards so the worker still gets both issues.
+# The triage-mode issue (DEMO-3) gets its own section below.
 
 log "Checking the demo-tracker plugin..."
 TRACKER_SOURCE="demo-tracker"
@@ -216,16 +217,16 @@ print(p[0]['state'] if p else 'missing: ' + json.dumps(d['plugins']))")
 [ "$PLUGIN_STATE" = "loaded" ] || { err "demo-tracker plugin didn't load ($PLUGIN_STATE); see $DAEMON_LOG"; exit 1; }
 ok "Plugin loaded (source '$TRACKER_SOURCE')"
 
-# Sync runs at startup; give it a moment to mirror and enqueue both open issues.
+# Sync runs at startup; give it a moment to mirror and enqueue the three open issues.
 tracker_ready() {
   curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(len([d for d in json.load(sys.stdin)['defs'] if d['latestState']=='READY']))"
 }
 for i in $(seq 1 30); do
-  [ "$(tracker_ready)" -ge 2 ] && break
+  [ "$(tracker_ready)" -ge 3 ] && break
   sleep 0.5
 done
-[ "$(tracker_ready)" -ge 2 ] || { err "Tracker issues weren't mirrored + enqueued"; exit 1; }
-ok "Tracker issues mirrored and enqueued (DEMO-1, DEMO-2)"
+[ "$(tracker_ready)" -ge 3 ] || { err "Tracker issues weren't mirrored + enqueued"; exit 1; }
+ok "Tracker issues mirrored and enqueued (DEMO-1, DEMO-2, DEMO-3)"
 
 # Wait (up to 5s) for a tracker issue's comments to contain a string.
 tracker_has_comment() {
@@ -248,6 +249,63 @@ curl -sf -X POST "$DAEMON_URL/api/work-items/$DEMO2_ITEM/cancel" >/dev/null
 tracker_has_comment DEMO-2 "ended CANCELED" || { err "Canceled run wasn't written back to $TRACKER_FILE"; exit 1; }
 curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-2/enqueue" >/dev/null || { err "Re-running DEMO-2 failed"; exit 1; }
 ok "Write-back lands in the tracker file (comment, canceled run); DEMO-2 re-queued"
+
+# ─── Demo-tracker: a triage-mode issue ───────────────────────────────
+#
+# DEMO-3 has "mode": "triage" (my-pizza-team docs/DESIGN.md "External sources" —
+# "Triage mode"): its run is a *triage* of the mirror, not work on it. Play the
+# teammate through the agent API as an unregistered id (so it never shows up as
+# a member): claim it and get the triage prompt, post a propose_work-style
+# analysis, finish, then accept the proposal as the user would. Accepting creates
+# a task and never runs it; a finished triage leaves the issue open. DEMO-3 is
+# re-queued at the end (Triage now) so the worker triages it for real.
+
+log "Checking the triage-mode issue (DEMO-3)..."
+TRIAGE_DEF="$TRACKER_SOURCE~DEMO-3"
+TRIAGER="e2e-triager"
+DEMO3_MODE=$(curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print([d.get('mode') for d in json.load(sys.stdin)['defs'] if d['id']=='$TRIAGE_DEF'][0])")
+[ "$DEMO3_MODE" = "triage" ] || { err "DEMO-3 isn't in triage mode ($DEMO3_MODE)"; exit 1; }
+DEMO3_ITEM=$(curl -sf "$DAEMON_URL/api/work-items?state=READY" | python3 -c "
+import sys, json
+items = [i for i in json.load(sys.stdin)['items'] if i['ref']['workDefId'] == '$TRIAGE_DEF']
+print(items[0]['id'] if items and items[0]['title'].startswith('Triage: ') else '')")
+[ -n "$DEMO3_ITEM" ] || { err "No 'Triage: …' WorkItem enqueued for DEMO-3"; exit 1; }
+
+curl -sf -X POST "$DAEMON_URL/api/agents/claim/$DEMO3_ITEM" -H "Content-Type: application/json" \
+  -d "{\"agentId\":\"$TRIAGER\"}" | python3 -c "
+import sys, json
+p = json.load(sys.stdin)['prompt']
+sys.exit(0 if '## Your Role: Triage' in p and 'DEMO-3' in p and 'due date' in p else 1)" \
+  || { err "DEMO-3's claim prompt isn't the triage prompt"; exit 1; }
+
+PROPOSE_CODE=$(http_code -X POST "$DAEMON_URL/api/agents/work-items/$DEMO3_ITEM/proposals" -H "Content-Type: application/json" -d "{
+  \"agentId\": \"$TRIAGER\", \"outcome\": \"proposals\",
+  \"body\": \"One small task covers it: an optional dueDate plus an overdue filter. No schedule needed yet.\",
+  \"proposals\": [{ \"id\": \"p1\", \"kind\": \"task\", \"title\": \"Add due dates and GET /todos?overdue=true\",
+    \"goal\": \"Accept an optional ISO dueDate on POST /todos and list overdue todos with ?overdue=true.\",
+    \"directory\": \"$PROJECT_DIR\" }]
+}")
+[ "$PROPOSE_CODE" = "200" ] || { err "propose_work on DEMO-3 was refused ($PROPOSE_CODE)"; exit 1; }
+triage_view() { curl -sf "$DAEMON_URL/api/work-defs/$TRIAGE_DEF/triage" | json_field "$1"; }
+[ "$(triage_view "d['badge'], len(d['pending'])")" = "proposal 1" ] || { err "DEMO-3's proposal isn't pending"; exit 1; }
+
+curl -sf -X POST "$DAEMON_URL/api/agents/work-items/$DEMO3_ITEM/state" -H "Content-Type: application/json" \
+  -d "{\"agentId\":\"$TRIAGER\",\"state\":\"COMPLETE\"}" >/dev/null || { err "Completing DEMO-3's triage failed"; exit 1; }
+tracker_has_comment DEMO-3 "ended COMPLETE" || { err "DEMO-3's triage outcome wasn't written back"; exit 1; }
+DEMO3_STATUS=$(python3 -c "import json; print([i['status'] for i in json.load(open('$TRACKER_FILE'))['issues'] if i['id']=='DEMO-3'][0])")
+[ "$DEMO3_STATUS" = "open" ] || { err "A finished triage closed DEMO-3 ($DEMO3_STATUS)"; exit 1; }
+
+CREATED=$(curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRIAGE_DEF/triage/proposals/p1/accept" | json_field "d['decision']['workDefId']")
+[ -n "$CREATED" ] || { err "Accepting DEMO-3's proposal created nothing"; exit 1; }
+# The created task names its origin in its frontmatter (originWorkDef), and has never run.
+grep -q "originWorkDef: .*$TRIAGE_DEF" "$TEAM_DIR/.my-pizza-team/tasks/$CREATED/workdef.md" \
+  || { err "Accepted task $CREATED doesn't link back to DEMO-3"; exit 1; }
+CREATED_RUNS=$(curl -sf "$DAEMON_URL/api/work-items" | python3 -c "import sys,json; print(len([i for i in json.load(sys.stdin)['items'] if i['ref']['workDefId']=='$CREATED']))")
+[ "$CREATED_RUNS" -eq 0 ] || { err "Accepting a proposal started its work"; exit 1; }
+[ "$(triage_view "d['badge'], len(d['pending'])")" = "none 0" ] || { err "DEMO-3 still shows a pending proposal after accepting"; exit 1; }
+
+curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRIAGE_DEF/enqueue" >/dev/null || { err "Triage now on DEMO-3 failed"; exit 1; }
+ok "Triage mode: DEMO-3 triaged (prompt, propose_work, accept → task $CREATED, not run), left open, re-queued"
 
 # ─── Launch Pi Leader ─────────────────────────────────────────────────
 
@@ -344,7 +402,7 @@ echo "  Leader:    $TMUX_SESSION:leader (in $TEAM_DIR)"
 echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:     'Add User Authentication' (3 tasks)"
-echo "  Tracker:   $TRACKER_FILE (demo-tracker plugin: DEMO-1, DEMO-2)"
+echo "  Tracker:   $TRACKER_FILE (demo-tracker plugin: DEMO-1, DEMO-2; DEMO-3 triage-mode)"
 echo "  Workflow:  todo → in_progress → review → done"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

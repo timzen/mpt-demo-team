@@ -12,10 +12,26 @@ my-pizza-team `GUIDE.md` "Writing a Work Source plugin" for the full plugin mode
 |------|----------|
 | `sync` (every `intervalSeconds`) | Every issue with `"status": "open"` becomes an external WorkDef. MPT mirrors it read-only (id `demo-tracker~<issue id>`) and enqueues one WorkItem per **revision** — the issue's `updatedAt` (or a hash of title/body when it has none). An issue that's no longer open stops being reported, so its mirror is archived. |
 | `onComment` | A comment on the mirrored WorkDef's thread (human, teammate, or daemon) is appended to the issue's `comments`. |
-| `onItemTerminal` | The run's outcome is written back: `COMPLETE` → `"status": "done"`, `FAILED` → `"failed"`, `CANCELED` → only a note. Each adds a `mpt` comment. |
+| `onItemTerminal` | The run's outcome is written back: `COMPLETE` → `"status": "done"`, `FAILED` → `"failed"`, `CANCELED` → only a note. Each adds a `mpt` comment. A **triage-mode** issue is never closed: it only gets a `triage … ended …` comment. |
 
 Comments it writes don't change the revision, so its own write-back never re-runs an issue.
 To re-run one, bump its `updatedAt` (and set it back to `open` if it was closed).
+
+## Triage mode
+
+An issue with `"mode": "triage"` (or every issue, with the `mode: "triage"`
+option; an issue's own `mode` wins, so `"mode": "work"` opts one back out) is
+reported with `ExternalDef.mode` / `WorkSource.mode` set, and MPT **triages** it
+instead of working it (my-pizza-team GUIDE.md "Triage-mode sources"; docs/DESIGN.md
+"External sources" — "Triage mode"). A teammate reads the issue and the team's
+`triage.md` and posts proposals with `propose_work`; you **Accept / Edit / Reject**
+them on the issue's **Triage** tab in MPT. Accepting creates the task (or story,
+or schedule) without starting it. The plugin does nothing else for this: the
+daemon picks the run's title ("Triage: …"), prompt, and Run (**Triage now**).
+
+Each new revision is a fresh triage, so to answer a teammate's question, edit the
+issue's `body` and bump its `updatedAt`. Proposals and decisions stay in MPT —
+they aren't written back to the tracker.
 
 ## The tracker file
 
@@ -29,6 +45,7 @@ To re-run one, bump its `updatedAt` (and set it back to `open` if it was closed)
       "acceptanceCriteria": "- optional",
       "status": "open",
       "updatedAt": "2024-06-01T10:00:00Z",
+      "mode": "work",
       "comments": []
     }
   ]
@@ -57,6 +74,7 @@ In the team's `config.json`:
 | `file` | `tracker.json` | The tracker file, relative to the team dir. |
 | `directory` | — | Working directory for the issues' WorkItems (relative to the team dir). |
 | `intervalSeconds` | `10` | How often to sync. |
+| `mode` | `work` | `"triage"` makes every issue triage-only (an issue's own `mode` wins). |
 | `urlBase` | `https://tracker.example/browse/` | Prefix of each issue's (fake) link. |
 | `id` / `label` | `demo-tracker` / `Demo Tracker` | Source id and UI tab name. |
 

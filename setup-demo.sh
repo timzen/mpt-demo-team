@@ -39,7 +39,7 @@ echo "   ✓ demo/team/.my-pizza-team/ created"
 # --- Copy the fake issue tracker (the demo-tracker plugin's "external system") ---
 echo "📁 Setting up the demo tracker..."
 cp -R "$FIXTURES_DIR/tracker" "$SCRIPT_DIR/demo/tracker"
-echo "   ✓ demo/tracker/tracker.json created (2 open issues)"
+echo "   ✓ demo/tracker/tracker.json created (3 open issues, 1 triage-mode)"
 
 # --- Patch fixtures with the real demo project path ---
 DEMO_PROJECT_PATH="$SCRIPT_DIR/demo/project"
@@ -87,8 +87,10 @@ echo "Plus a pending story (\"Polish the UI Theme\") and two standalone WorkDefs
 echo "   • Solitary:  Audit project dependencies   (Tasks page → Run)"
 echo "   • Scheduled: Nightly test run @ 2am        (Schedule page → Run now)"
 echo ""
-echo "Plus the demo-tracker plugin (plugins/mpt-source-demo-tracker): its 2 open"
-echo "issues show up on the \"Demo Tracker\" tab of the Work page. Edit"
+echo "Plus the demo-tracker plugin (plugins/mpt-source-demo-tracker): its 3 open"
+echo "issues show up on the \"Demo Tracker\" tab of the Work page. DEMO-1 and DEMO-2"
+echo "are worked; DEMO-3 (\"mode\": \"triage\") is triaged — a teammate proposes work"
+echo "you Accept or Reject on its Triage tab. Edit"
 echo "$TRACKER_FILE to see it re-sync (every 10s)."
 echo ""
 echo "The demo project is a simple todo API in demo/project/src/index.ts"

@@ -16,6 +16,14 @@
 //   - onComment:      a comment on the issue's MPT thread is appended to `comments`.
 //   - onItemTerminal: a finished run writes the outcome back — COMPLETE marks the
 //                     issue "done", FAILED marks it "failed", CANCELED just leaves a note.
+//
+// Triage mode: an issue with `"mode": "triage"` (or every issue, with the plugin
+// option `mode: "triage"`; an issue's own `mode` wins) isn't worked — a teammate
+// *triages* it, like a note's Auto Triage, and proposes tasks/stories/schedules
+// that you accept or reject in MPT (the issue's Triage tab). The daemon owns how
+// such an item runs (title, prompt, Run = Triage now); the plugin only reports the
+// mode. Write-back still applies, except that a finished triage never closes the
+// issue — it was triaged, not done (see onItemTerminal).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -24,7 +32,7 @@ import { createHash } from "node:crypto";
 // never installed here), so this is always the running app's value.
 import { WORK_SOURCE_API_VERSION } from "my-pizza-team/plugin";
 
-/** @typedef {{ id: string, title: string, body?: string, acceptanceCriteria?: string, status: string, updatedAt?: string, comments?: { at: string, author: string, body: string }[] }} Issue */
+/** @typedef {{ id: string, title: string, body?: string, acceptanceCriteria?: string, status: string, updatedAt?: string, mode?: "work" | "triage", comments?: { at: string, author: string, body: string }[] }} Issue */
 
 /**
  * The default export is a factory: called once at daemon startup with this
@@ -37,6 +45,13 @@ export default function demoTracker(options, { teamDir }) {
   const directory = options.directory ? path.resolve(teamDir, String(options.directory)) : undefined;
   const everySeconds = Number(options.intervalSeconds ?? 10);
   const urlBase = String(options.urlBase ?? "https://tracker.example/browse/");
+  // The source-wide mode ("work" | "triage"); each issue may override it.
+  const sourceMode = options.mode === "triage" ? "triage" : "work";
+
+  /** An issue's effective mode: its own `mode`, else the plugin's. (MPT applies the same rule.) */
+  function modeOf(issue) {
+    return issue.mode === "triage" || issue.mode === "work" ? issue.mode : sourceMode;
+  }
 
   /** @returns {{ issues: Issue[] }} */
   function readTracker() {
@@ -71,6 +86,8 @@ export default function demoTracker(options, { teamDir }) {
     label: String(options.label ?? "Demo Tracker"), // the UI tab's name, and "Open in Demo Tracker"
     apiVersion: WORK_SOURCE_API_VERSION,
     syncEveryMs: () => everySeconds * 1000,
+    // Triage mode for every item from this source (an ExternalDef's own `mode` wins).
+    mode: sourceMode,
 
     init(ctx) {
       ctx.log(`reading issues from ${file} every ${everySeconds}s`);
@@ -91,6 +108,9 @@ export default function demoTracker(options, { teamDir }) {
           acceptanceCriteria: issue.acceptanceCriteria,
           directory,
           url: urlBase + encodeURIComponent(issue.id),
+          // Only when the issue sets one; otherwise the source's `mode` applies.
+          // A mode change alone isn't a new revision: it applies from the next run.
+          ...(issue.mode === "triage" || issue.mode === "work" ? { mode: issue.mode } : {}),
         }));
     },
 
@@ -101,6 +121,12 @@ export default function demoTracker(options, { teamDir }) {
 
     onItemTerminal(def, item, ctx) {
       updateIssue(def.parent?.id, (issue) => {
+        if (modeOf(issue) === "triage") {
+          // A triage run produced proposals (accepted or rejected in MPT), not a
+          // fix: leave the issue open. Its next revision is triaged again.
+          addComment(issue, "mpt", `triage ${item.id} ended ${item.state}`);
+          return;
+        }
         if (item.state === "COMPLETE") issue.status = "done";
         else if (item.state === "FAILED") issue.status = "failed";
         addComment(issue, "mpt", `run ${item.id} ended ${item.state}`);
