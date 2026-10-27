@@ -37,10 +37,10 @@ mpt-demo-team/
 ├── plugins/
 │   └── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build)
 ├── plugins.local.example.json     # Example overlay for your own plugins (see "Trying your own plugins")
-├── try-plugin.sh           # Doctor a plugin, add it to plugins.local.json, bring the sandbox up
+├── try-plugin.sh           # Install (git/npm) + doctor a plugin, add it to plugins.local.json, bring the sandbox up
 ├── run-ui.sh               # Daemon only (no agents); --restart, --clean
 ├── run-e2e.sh              # Full end-to-end run (daemon + leader + worker)
-├── .gitignore              # Ignores demo/ runtime dir and plugins.local.json
+├── .gitignore              # Ignores demo/, plugins.local.json and .plugin-packages/
 └── README.md
 ```
 
@@ -155,9 +155,44 @@ entry needs a daemon restart (the tracker file itself doesn't).
 ## Trying your own plugins
 
 The demo team doubles as a **plugin sandbox**: try any Work Source plugin package
-(e.g. `~/ws/MPT/src/MPTSimWorkSources`, or one you're writing) against a
-throwaway team before it goes into a real one — without committing your personal
-config, and without losing it when the demo resets.
+— a git URL (`ssh://git.amazon.com/pkg/MPTSimWorkSources`), an `npm:` spec, or a
+local checkout you're writing — against a throwaway team before it goes into a
+real one, without committing your personal config, and without losing it (or
+re-cloning it) when the demo resets.
+
+**From a git URL (or npm spec)** — the quickest way:
+
+```bash
+./try-plugin.sh ssh://git.amazon.com/pkg/MPTSimWorkSources \
+  --config '{"taskei":{"workflowStep":"Implementation","dryRun":false,"maxItems":3}}'
+```
+
+It runs `./setup-demo.sh` (so the demo team exists), then
+`mpt plugins add <spec> [--config …]` against the demo team — clone, `npm install
+--omit=peer`, `npm run build` into `demo/team/.my-pizza-team/packages/` — then
+`mpt plugins doctor <spec> [--config …]`. On failure it prints the error, undoes
+the install (`mpt plugins remove`) and leaves `plugins.local.json` unchanged. On
+success it records the spec (as given) in `plugins.local.json`, re-runs setup and
+starts `run-ui.sh --restart` (unless `--no-start`). `git:<host>/<path>`,
+`https://…` URLs and an `@ref` suffix (branch, tag, commit) work too.
+
+- **The package cache.** Installed packages (`demo/team/.my-pizza-team/packages/`)
+  survive `./setup-demo.sh` (and so `run-ui.sh` / `--restart`): setup moves them
+  aside to `.plugin-packages/` (gitignored) while it resets `demo/`, then back.
+  Re-running `./try-plugin.sh <spec>` for an installed spec only runs the doctor
+  (fast); **`--update`** re-fetches and rebuilds it first (`mpt plugins update`).
+  **`./setup-demo.sh --fresh`** also clears the cache; a spec still in
+  `plugins.local.json` is then reinstalled by the daemon on its next start (or by
+  the next `try-plugin.sh`).
+- **The contract** (MPT isn't build-system aware): a git plugin must install and
+  build with plain npm against your configured registry (`npm config get
+  registry`), or ship prebuilt `mpt.sources` entries.
+- **Prerequisites:** git access to the host (for `ssh://git.amazon.com/…`, your
+  ssh key set up for git.amazon.com — `git ls-remote <url>` should work). For
+  live syncs of the SIM plugins (MPTSimWorkSources with `--config`, and the
+  running daemon): `mcscli` on your PATH and a fresh `mwinit`.
+- `./try-plugin.sh --remove <spec>` drops it from `plugins.local.json` and deletes
+  its install from the cache.
 
 Your plugins live in **`plugins.local.json`** (gitignored): a JSON array of
 entries in the same format as config.json `packages` — a spec string, or
@@ -170,7 +205,8 @@ filled in, and bad JSON stops the setup with an error. Entries with only a `"//"
 key are comments. See `plugins.local.example.json` (MPTSimWorkSources with
 placeholders) — copy it, or let `try-plugin.sh` write the file for you.
 
-**The workflow:**
+**From a local checkout** (a plugin you're developing): the same script with a
+path. It isn't installed — it loads in place — so build it yourself first:
 
 ```bash
 # 1. Build the plugin (Brazil packages: brazil-build, never plain npm)
@@ -188,9 +224,10 @@ placeholders) — copy it, or let `try-plugin.sh` write the file for you.
 (cd ~/ws/MPT/src/MPTSimWorkSources && brazil-build) && ./run-ui.sh --restart
 ```
 
-- `./try-plugin.sh <path|spec> [--config '<json>'] [--no-start]` — stops if the
-  doctor fails (plugins.local.json unchanged). Without `--config` an entry's
-  existing config is kept. `--no-start` sets up without starting the daemon.
+- `./try-plugin.sh <path|spec> [--config '<json>'] [--no-start] [--update]` — stops
+  if the install or doctor fails (plugins.local.json unchanged). Without `--config`
+  an entry's existing config is kept. `--no-start` sets up without starting the
+  daemon; `--update` applies to git/npm specs only.
 - `./try-plugin.sh --list` shows the entries; `./try-plugin.sh --remove <path|spec>`
   removes one (then `./run-ui.sh --restart`). `./try-plugin.sh --help` for the rest.
 - Relative paths *inside* a config are up to the plugin: the daemon passes the
@@ -210,19 +247,21 @@ system if your plugin does real write-back.
 
 **Where the data goes.** Items from a real external system (Taskei tasks, SIM
 tickets, …) are mirrored only into the gitignored `demo/` (the demo team dir);
-nothing lands in this repo, and `setup-demo.sh` / `--restart` wipe it.
+nothing lands in this repo, and `setup-demo.sh` / `--restart` wipe it (all but
+the installed packages, see "The package cache").
 
 **Graduating to a real team.** Once it behaves here, add it to the real team
 the same way, from that team's directory:
-`mpt plugins doctor <path> --config '<json>'`, then
-`mpt plugins add <path> --config '<json>'` (or edit its config.json `packages`),
+`mpt plugins doctor <path|spec> --config '<json>'`, then
+`mpt plugins add <path|spec> --config '<json>'` (or edit its config.json `packages`),
 and restart that team's daemon. Drop the sandbox-only bits (a `directory` under
 `demo/`, tiny `maxItems`), and remove the entry here if you like.
 
 ## Resetting
 
 Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures
-(and re-merges `plugins.local.json`, which lives outside `demo/`).
+(and re-merges `plugins.local.json`, which lives outside `demo/`). Installed plugin
+packages are kept; `./setup-demo.sh --fresh` clears them too.
 
 ## Just the UI (no agents)
 

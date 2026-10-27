@@ -13,17 +13,46 @@
 #
 # Both live under ./demo/ which is .gitignored so you can freely experiment.
 #
+# Installed plugin packages (demo/team/.my-pizza-team/packages/ — git clones and
+# npm installs from `mpt plugins add` / ./try-plugin.sh / the daemon's
+# install-on-start) survive the reset: they're moved aside to ./.plugin-packages/
+# (gitignored) before demo/ is wiped and moved back after the fixtures are copied.
+#
+# Usage:
+#   ./setup-demo.sh          # Reset demo/ (keeps installed plugin packages)
+#   ./setup-demo.sh --fresh  # Reset demo/ and clear the plugin package cache too
+#
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
+PACKAGES_DIR="$SCRIPT_DIR/demo/team/.my-pizza-team/packages"
+PACKAGES_CACHE="$SCRIPT_DIR/.plugin-packages"
+
+FRESH=0
+case "${1:-}" in
+  "") ;;
+  --fresh) FRESH=1 ;;
+  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "✗ Unknown option $1 (try --fresh or --help)" >&2; exit 1 ;;
+esac
 
 echo "🍕 MPT Demo Setup"
 echo "=================="
 echo ""
 
-# --- Clean slate ---
+# --- Clean slate (installed plugin packages moved aside first) ---
+# The cache only holds packages between the move-aside and the restore below; if
+# a previous run died in between, it's restored now (a live demo copy wins).
+if [ -d "$PACKAGES_DIR" ]; then
+  rm -rf "$PACKAGES_CACHE"
+  mv "$PACKAGES_DIR" "$PACKAGES_CACHE"
+fi
+if [ "$FRESH" = 1 ]; then
+  rm -rf "$PACKAGES_CACHE"
+  echo "🧹 Cleared the plugin package cache (--fresh)"
+fi
 rm -rf "$SCRIPT_DIR/demo"
 mkdir -p "$SCRIPT_DIR/demo/team"
 
@@ -36,6 +65,11 @@ echo "   ✓ demo/project/ created"
 echo "📁 Setting up team directory..."
 cp -R "$FIXTURES_DIR/team" "$SCRIPT_DIR/demo/team/.my-pizza-team"
 echo "   ✓ demo/team/.my-pizza-team/ created"
+if [ -d "$PACKAGES_CACHE" ]; then
+  rm -rf "$PACKAGES_DIR"
+  mv "$PACKAGES_CACHE" "$PACKAGES_DIR"
+  echo "   ✓ installed plugin packages kept (demo/team/.my-pizza-team/packages/; --fresh clears them)"
+fi
 
 # --- Copy the fake issue tracker (the demo-tracker plugin's "external system") ---
 echo "📁 Setting up the demo tracker..."
@@ -51,6 +85,8 @@ echo "   ✓ demo/tracker/tracker.json created (3 open issues, 1 triage-mode)"
 # the team dir. An entry with the same package as a fixture entry replaces it.
 # Entries like { "//": "..." } are comments and skipped. Merged before the
 # __DEMO_PROJECT__ substitution below, so a local config may use it too.
+# npm:/git: entries are kept whether or not they're installed yet: the daemon
+# installs missing packages on start (into the kept packages/ dir above).
 # run-e2e.sh sets MPT_DEMO_NO_LOCAL_PLUGINS=1 to keep e2e deterministic.
 LOCAL_PLUGINS="$SCRIPT_DIR/plugins.local.json"
 if [ -f "$LOCAL_PLUGINS" ] && [ "${MPT_DEMO_NO_LOCAL_PLUGINS:-}" != "1" ]; then

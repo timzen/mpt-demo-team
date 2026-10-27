@@ -45,11 +45,12 @@ mpt-demo-team/
 ├── plugins/
 │   └── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, README)
 ├── plugins.local.example.json    # Example plugin overlay (plugins.local.json is gitignored)
-├── setup-demo.sh         # Run to (re)create demo/ from fixtures (+ merges plugins.local.json)
-├── try-plugin.sh         # mpt plugins doctor → plugins.local.json → setup → run-ui.sh
+├── setup-demo.sh         # Run to (re)create demo/ from fixtures (+ merges plugins.local.json;
+│                         #   keeps installed plugin packages; --fresh clears them)
+├── try-plugin.sh         # [git/npm: mpt plugins add] → mpt plugins doctor → plugins.local.json → setup → run-ui.sh
 ├── run-ui.sh             # Daemon only, no agents (--restart, --clean); prints plugin statuses
 ├── run-e2e.sh            # Full e2e run (ignores plugins.local.json)
-├── .gitignore            # Ignores demo/ runtime directory and plugins.local.json
+├── .gitignore            # Ignores demo/, plugins.local.json and .plugin-packages/
 └── README.md
 ```
 
@@ -111,7 +112,21 @@ entries winning; the demo-tracker entry kept otherwise) and skips it when
 `MPT_DEMO_NO_LOCAL_PLUGINS=1`, which `run-e2e.sh` sets so e2e stays deterministic.
 `plugins.local.example.json` shows MPTSimWorkSources with placeholder config.
 
-- Workflow: build the plugin (`brazil-build` for Brazil packages) →
+- Git/npm specs: `./try-plugin.sh ssh://git.amazon.com/pkg/MPTSimWorkSources
+  [--config '<json>']` runs setup, `mpt plugins add <spec>` against the demo team
+  (clone + `npm install --omit=peer` + `npm run build` into
+  `demo/team/.my-pizza-team/packages/`), then `mpt plugins doctor`; on failure it
+  `mpt plugins remove`s it and leaves plugins.local.json alone; on success it
+  records the spec as-is, re-runs setup, starts `run-ui.sh --restart`. Re-runs for
+  an installed spec only doctor it; `--update` runs `mpt plugins update` first.
+  Contract: the plugin installs + builds with plain npm, or ships prebuilt entries
+  (MPT is not Brazil-aware). Needs git access to the host (ssh key for
+  git.amazon.com); live SIM syncs need `mcscli` + a fresh `mwinit`.
+- **Package cache:** `setup-demo.sh` moves `demo/team/.my-pizza-team/packages/`
+  aside to `.plugin-packages/` (gitignored) while it resets `demo/` and restores
+  it, so installs survive resets; `./setup-demo.sh --fresh` clears it. The merge
+  keeps entries that aren't installed — the daemon installs missing packages on start.
+- Local paths: build the plugin (`brazil-build` for Brazil packages) →
   `./try-plugin.sh <path> --config '<json>'` (runs `mpt plugins doctor` from
   `../my-pizza-team` source and stops on failure, records the entry, runs setup,
   starts `run-ui.sh --restart`; `--no-start`, `--list`, `--remove`) → browse the
@@ -119,7 +134,7 @@ entries winning; the demo-tracker entry kept otherwise) and skips it when
 - `run-ui.sh` starts no agents. With agents, teammates work in `demo/project`
   unless the plugin config sets `directory`.
 - Real external data is mirrored only into the gitignored `demo/`.
-- Graduate a plugin with `mpt plugins doctor` + `mpt plugins add <path> --config …`
+- Graduate a plugin with `mpt plugins doctor` + `mpt plugins add <path|spec> --config …`
   in the real team, then restart its daemon. README "Trying your own plugins" has the details.
 - Never commit a `plugins.local.json`, and keep real group names / logins out of
   the example (placeholders only). The scripts write nothing outside this repo.
