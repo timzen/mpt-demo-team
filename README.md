@@ -13,25 +13,29 @@ mpt-demo-team/
 │   │   ├── tests/          # Basic tests
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── team/               # MPT team directory fixture (flat; see my-pizza-team docs/WORKDEF_UNIFICATION.md)
-│       ├── config.json
-│       ├── workflows/default/
-│       │   ├── workflow.json
-│       │   └── in_progress.md      # state persona for the one agent state
-│       ├── stories/               # flat story files (children live in tasks/)
-│       │   ├── add-user-auth.json      # tasks: [{id,status}]; directory = demo project
-│       │   └── ui-theme-polish.json    # pending (design-review gate)
-│       ├── tasks/                 # EVERY unit of work is a WorkDef (authored markdown)
-│       │   ├── add-user-auth-1/workdef.md     # board task (parent: story add-user-auth)
-│       │   ├── add-user-auth-2/workdef.md
-│       │   ├── add-user-auth-3/workdef.md
-│       │   ├── ui-theme-polish-1/workdef.md
-│       │   ├── audit-project-dependencies/workdef.md  # Solitary (no parent)
-│       │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule)
-│       ├── schedules/             # cron parents (fire their child WorkDefs)
-│       │   └── nightly-test-run.json                  # cron 0 2 * * *
-│       └── context/
-│           └── project-conventions.md
+│   ├── team/               # MPT team directory fixture (flat; see my-pizza-team docs/WORKDEF_UNIFICATION.md)
+│   │   ├── config.json            # `packages` loads the demo-tracker plugin
+│   │   ├── workflows/default/
+│   │   │   ├── workflow.json
+│   │   │   └── in_progress.md      # state persona for the one agent state
+│   │   ├── stories/               # flat story files (children live in tasks/)
+│   │   │   ├── add-user-auth.json      # tasks: [{id,status}]; directory = demo project
+│   │   │   └── ui-theme-polish.json    # pending (design-review gate)
+│   │   ├── tasks/                 # EVERY unit of work is a WorkDef (authored markdown)
+│   │   │   ├── add-user-auth-1/workdef.md     # board task (parent: story add-user-auth)
+│   │   │   ├── add-user-auth-2/workdef.md
+│   │   │   ├── add-user-auth-3/workdef.md
+│   │   │   ├── ui-theme-polish-1/workdef.md
+│   │   │   ├── audit-project-dependencies/workdef.md  # Solitary (no parent)
+│   │   │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule)
+│   │   ├── schedules/             # cron parents (fire their child WorkDefs)
+│   │   │   └── nightly-test-run.json                  # cron 0 2 * * *
+│   │   └── context/
+│   │       └── project-conventions.md
+│   └── tracker/
+│       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2)
+├── plugins/
+│   └── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build)
 ├── .gitignore              # Ignores demo/ runtime dir
 └── README.md
 ```
@@ -46,6 +50,7 @@ cd mpt-demo-team
 This copies fixtures into:
 - `./demo/project/` — the code agents will work on
 - `./demo/team/.my-pizza-team/` — the team directory MPT reads
+- `./demo/tracker/tracker.json` — the demo-tracker plugin's fake issue tracker
 
 The entire `demo/` directory is `.gitignored` so you can experiment freely.
 
@@ -102,6 +107,36 @@ Completed work (from stories or WorkDefs) shows up in the **Inbox** on the home
 page for review. See my-pizza-team `docs/FRONTIER_ENGINEER_REFACTOR_PLAN.md` for
 the WorkItem/WorkDef model.
 
+## The Demo-Tracker Plugin
+
+`plugins/mpt-source-demo-tracker/` is an example **Work Source plugin** (see its
+README and my-pizza-team `GUIDE.md` "Writing a Work Source plugin"): a fake,
+offline issue tracker backed by `demo/tracker/tracker.json`. The team's
+`config.json` lists it under `packages` by local path — loaded in place, no
+install — with `config: { file, directory, intervalSeconds }`.
+
+Every 10s it syncs the tracker's **open** issues into MPT, which mirrors each
+(read-only) and enqueues one run per revision. The seed has two issues against
+the todo API: **DEMO-1** "Add GET /todos/:id" and **DEMO-2** "Validate empty
+titles". Write-back goes the other way: comments on an issue's thread are
+appended to its `comments`, and a finished run marks it `done` / `failed` (a
+canceled run just leaves a note).
+
+How to watch it:
+
+- **UI:** Work → **Demo Tracker** tab (`/work/source/demo-tracker`): each issue,
+  its fake link, revision, and latest run. **Sync now** pulls immediately.
+- **CLI:** from `demo/team`, `mpt plugins list` shows whether it's installed and
+  loaded (and the error if not). `curl localhost:<port>/api/work-sources` shows the same.
+- **Re-sync:** edit `demo/tracker/tracker.json` — add an issue, or bump an
+  issue's `updatedAt` to run it again; set its `status` to anything but `open`
+  and its mirror is archived. Changes show up within ~10s.
+- **Write-back:** comment on an issue in the UI, or let a teammate finish one, then
+  look at the tracker file.
+
+Plugins load at daemon startup, so a change to the plugin code or its `packages`
+entry needs a daemon restart (the tracker file itself doesn't).
+
 ## Resetting
 
 Just run `./setup-demo.sh` again — it nukes the `demo/` dir and copies fresh fixtures.
@@ -120,7 +155,7 @@ source in the foreground — no leader, no worker:
 Then open <http://localhost:7437/> (Board · Tasks · Schedule). Override the port
 with `PORT=8080 ./run-ui.sh`.
 
-Prerequisites: `deno` only (the UI is served prebuilt from `my-pizza-team/ui/dist`).
+Prerequisites: `node` 24+ only (the UI is served prebuilt from `my-pizza-team/ui/dist`).
 
 ## E2E Test Run
 
@@ -133,11 +168,13 @@ To run the full end-to-end flow (daemon + leader + worker agent):
 This will:
 1. Set up demo fixtures (runs `setup-demo.sh`)
 2. Start the MPT daemon from `../my-pizza-team` source
-3. Launch a Pi leader in a tmux session
-4. Spawn a worker agent pointed at `demo/project/`
-5. Monitor task progress until you Ctrl+C
+3. Check the demo-tracker plugin: loaded, both issues mirrored and enqueued, and
+   write-back (a thread comment, a canceled run) lands in `demo/tracker/tracker.json`
+4. Launch a Pi leader in a tmux session
+5. Spawn a worker agent pointed at `demo/project/`
+6. Monitor task progress (and the tracker issues' statuses) until you Ctrl+C
 
-Prerequisites: `pi`, `deno`, `tmux`, and the Pi extension installed (`mpt setup`).
+Prerequisites: `pi`, `node` 24+, `tmux`, and the Pi extension installed (`mpt setup`).
 
 To clean up running processes:
 ```bash

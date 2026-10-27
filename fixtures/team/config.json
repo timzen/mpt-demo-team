@@ -12,5 +12,15 @@
   },
   "teammates": {
     "nouns": ["ripley", "deckard"]
-  }
+  },
+  "packages": [
+    {
+      "source": "../../../plugins/mpt-source-demo-tracker",
+      "config": {
+        "file": "../../tracker/tracker.json",
+        "directory": "__DEMO_PROJECT__",
+        "intervalSeconds": 10
+      }
+    }
+  ]
 }

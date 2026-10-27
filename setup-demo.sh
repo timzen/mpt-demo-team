@@ -5,6 +5,10 @@
 # Creates:
 #   ./demo/project/          — The demo todo API code (agents work here)
 #   ./demo/team/.my-pizza-team/  — The team directory (MPT daemon reads this)
+#   ./demo/tracker/tracker.json  — The demo-tracker plugin's fake issue tracker
+#
+# The team's config.json loads the example plugin in place from
+# ./plugins/mpt-source-demo-tracker (a relative local path, no install step).
 #
 # Both live under ./demo/ which is .gitignored so you can freely experiment.
 #
@@ -32,6 +36,11 @@ echo "📁 Setting up team directory..."
 cp -R "$FIXTURES_DIR/team" "$SCRIPT_DIR/demo/team/.my-pizza-team"
 echo "   ✓ demo/team/.my-pizza-team/ created"
 
+# --- Copy the fake issue tracker (the demo-tracker plugin's "external system") ---
+echo "📁 Setting up the demo tracker..."
+cp -R "$FIXTURES_DIR/tracker" "$SCRIPT_DIR/demo/tracker"
+echo "   ✓ demo/tracker/tracker.json created (2 open issues)"
+
 # --- Patch fixtures with the real demo project path ---
 DEMO_PROJECT_PATH="$SCRIPT_DIR/demo/project"
 TEAM_DIR_PATH="$SCRIPT_DIR/demo/team/.my-pizza-team"
@@ -43,7 +52,8 @@ grep -rl "__DEMO_PROJECT__" "$TEAM_DIR_PATH" | while read -r f; do
   # Use a non-slash delimiter since the replacement is an absolute path.
   sed -i.bak "s|__DEMO_PROJECT__|$DEMO_PROJECT_PATH|g" "$f" && rm -f "$f.bak"
 done
-echo "   ✓ story + WorkDef directories pointed at the demo project"
+echo "   ✓ story, WorkDef, and plugin directories pointed at the demo project"
+TRACKER_FILE="$SCRIPT_DIR/demo/tracker/tracker.json"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -52,6 +62,7 @@ echo "✅ Demo ready! Use these paths with MPT:"
 echo ""
 echo "   Team dir:     $TEAM_DIR_PATH"
 echo "   Project dir:  $DEMO_PROJECT_PATH"
+echo "   Tracker file: $TRACKER_FILE"
 echo ""
 echo "To run the daemon against this demo:"
 echo ""
@@ -75,6 +86,10 @@ echo ""
 echo "Plus a pending story (\"Polish the UI Theme\") and two standalone WorkDefs:"
 echo "   • Solitary:  Audit project dependencies   (Tasks page → Run)"
 echo "   • Scheduled: Nightly test run @ 2am        (Schedule page → Run now)"
+echo ""
+echo "Plus the demo-tracker plugin (plugins/mpt-source-demo-tracker): its 2 open"
+echo "issues show up on the \"Demo Tracker\" tab of the Work page. Edit"
+echo "$TRACKER_FILE to see it re-sync (every 10s)."
 echo ""
 echo "The demo project is a simple todo API in demo/project/src/index.ts"
 echo "Agents will modify it as they work through the tasks."

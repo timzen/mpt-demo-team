@@ -7,7 +7,7 @@
 # launches NO leader and NO worker — it's purely for viewing the seeded data.
 #
 # Prerequisites:
-#   - `deno` available (for running the daemon from source)
+#   - `node` 24+ available (runs the daemon from source; plugins need Node's module hooks)
 #
 # Usage:
 #   ./run-ui.sh          # Set up fixtures + start the daemon (Ctrl+C to stop)
@@ -55,8 +55,8 @@ fi
 
 # ─── Preflight ────────────────────────────────────────────────────────
 
-if ! command -v deno &>/dev/null; then
-  err "deno not found. Install: https://deno.land/#installation"
+if ! command -v node &>/dev/null; then
+  err "node not found. Install Node.js 24+: https://nodejs.org/"
   exit 1
 fi
 
@@ -93,7 +93,9 @@ echo "  Tasks:     ${DAEMON_URL}/tasks"
 echo "  Schedule:  ${DAEMON_URL}/schedule"
 echo ""
 echo "  Seeded: 'Add User Authentication' (3 tasks), a pending 'Polish the UI"
-echo "  Theme' story, plus Solitary + Scheduled standalone WorkDefs."
+echo "  Theme' story, plus Solitary + Scheduled standalone WorkDefs, and the"
+echo "  demo-tracker plugin's 2 issues (Work → Demo Tracker; edit"
+echo "  $DEMO_DIR/tracker/tracker.json to re-sync)."
 echo ""
 echo "  Ctrl+C to stop."
 echo ""
@@ -103,6 +105,4 @@ echo ""
 # Run in the foreground so Ctrl+C stops it directly. The UI is served from
 # my-pizza-team/ui/dist (resolved relative to the daemon's main module).
 cd "$MPT_SOURCE"
-exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" \
-  deno run --allow-net --allow-read --allow-write --allow-env --allow-run \
-  daemon/main.ts
+exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" node daemon/main.ts

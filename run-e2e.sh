@@ -8,7 +8,7 @@
 # Prerequisites:
 #   - `pi` installed globally (npm i -g @earendil-works/pi-coding-agent)
 #   - the Pi extension installed (`mpt setup`, or `pi install /path/to/my-pizza-team/harnesses/pi`)
-#   - `deno` available (for running the daemon from source)
+#   - `node` 24+ available (runs the daemon from source; plugins need Node's module hooks)
 #   - `tmux` available (for agent spawning)
 #
 # Usage:
@@ -23,6 +23,7 @@ MPT_SOURCE="$SCRIPT_DIR/../my-pizza-team"
 DEMO_DIR="$SCRIPT_DIR/demo"
 TEAM_DIR="$DEMO_DIR/team"
 PROJECT_DIR="$DEMO_DIR/project"
+TRACKER_FILE="$DEMO_DIR/tracker/tracker.json"
 DAEMON_PORT=7438
 DAEMON_URL="http://localhost:$DAEMON_PORT"
 TMUX_SESSION="mpt-demo"
@@ -102,8 +103,8 @@ if ! command -v pi &>/dev/null; then
   exit 1
 fi
 
-if ! command -v deno &>/dev/null; then
-  err "deno not found. Install: https://deno.land/#installation"
+if ! command -v node &>/dev/null; then
+  err "node not found. Install Node.js 24+: https://nodejs.org/"
   exit 1
 fi
 
@@ -139,8 +140,7 @@ log "Starting MPT daemon on port $DAEMON_PORT..."
 DAEMON_LOG="$DEMO_DIR/daemon.log"
 cd "$MPT_SOURCE"
 TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
-  deno run --allow-net --allow-read --allow-write --allow-env --allow-run \
-  daemon/main.ts > "$DAEMON_LOG" 2>&1 &
+  node daemon/main.ts > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 cd "$SCRIPT_DIR"
 
@@ -198,6 +198,56 @@ pending_items() {
 [ "$(http_code -X PUT "$DAEMON_URL/api/work-defs/$PENDING_ID" -H "Content-Type: application/json" -d '{"goal":"too late"}')" = "409" ] || { err "Active WorkDef was still editable"; exit 1; }
 curl -sf -X DELETE "$DAEMON_URL/api/work-defs/$PENDING_ID" >/dev/null
 ok "Pending: not enqueued, editable, locked once activated"
+
+# ─── Demo-tracker plugin ─────────────────────────────────────────────
+#
+# fixtures/team/config.json loads plugins/mpt-source-demo-tracker in place. Check
+# it loaded, that its open issues were mirrored and enqueued, and that write-back
+# reaches the tracker file: a thread comment, and a canceled run's outcome. The
+# canceled issue is re-run afterwards so the worker still gets both issues.
+
+log "Checking the demo-tracker plugin..."
+TRACKER_SOURCE="demo-tracker"
+PLUGIN_STATE=$(curl -sf "$DAEMON_URL/api/work-sources" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+p = [p for p in d['plugins'] if '$TRACKER_SOURCE' in p['sources']]
+print(p[0]['state'] if p else 'missing: ' + json.dumps(d['plugins']))")
+[ "$PLUGIN_STATE" = "loaded" ] || { err "demo-tracker plugin didn't load ($PLUGIN_STATE); see $DAEMON_LOG"; exit 1; }
+ok "Plugin loaded (source '$TRACKER_SOURCE')"
+
+# Sync runs at startup; give it a moment to mirror and enqueue both open issues.
+tracker_ready() {
+  curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(len([d for d in json.load(sys.stdin)['defs'] if d['latestState']=='READY']))"
+}
+for i in $(seq 1 30); do
+  [ "$(tracker_ready)" -ge 2 ] && break
+  sleep 0.5
+done
+[ "$(tracker_ready)" -ge 2 ] || { err "Tracker issues weren't mirrored + enqueued"; exit 1; }
+ok "Tracker issues mirrored and enqueued (DEMO-1, DEMO-2)"
+
+# Wait (up to 5s) for a tracker issue's comments to contain a string.
+tracker_has_comment() {
+  for i in $(seq 1 10); do
+    python3 -c "
+import sys, json
+issue = [i for i in json.load(open('$TRACKER_FILE'))['issues'] if i['id'] == '$1'][0]
+sys.exit(0 if any('$2' in c['body'] for c in issue.get('comments', [])) else 1)" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-1/comment" -H "Content-Type: application/json" \
+  -d '{"from":"e2e","body":"e2e write-back check"}' >/dev/null
+tracker_has_comment DEMO-1 "e2e write-back check" || { err "Comment wasn't written back to $TRACKER_FILE"; exit 1; }
+
+DEMO2_ITEM=$(curl -sf "$DAEMON_URL/api/work-items?state=READY" | python3 -c "import sys,json; print([i['id'] for i in json.load(sys.stdin)['items'] if i['ref']['workDefId']=='$TRACKER_SOURCE~DEMO-2'][0])")
+curl -sf -X POST "$DAEMON_URL/api/work-items/$DEMO2_ITEM/cancel" >/dev/null
+tracker_has_comment DEMO-2 "ended CANCELED" || { err "Canceled run wasn't written back to $TRACKER_FILE"; exit 1; }
+curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-2/enqueue" >/dev/null || { err "Re-running DEMO-2 failed"; exit 1; }
+ok "Write-back lands in the tracker file (comment, canceled run); DEMO-2 re-queued"
 
 # ─── Launch Pi Leader ─────────────────────────────────────────────────
 
@@ -294,6 +344,7 @@ echo "  Leader:    $TMUX_SESSION:leader (in $TEAM_DIR)"
 echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:     'Add User Authentication' (3 tasks)"
+echo "  Tracker:   $TRACKER_FILE (demo-tracker plugin: DEMO-1, DEMO-2)"
 echo "  Workflow:  todo → in_progress → review → done"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -325,7 +376,12 @@ try:
     parts = [f'{k}:{v}' for k,v in sorted(by_status.items())]
     working = agents.get('working', 0)
     idle = agents.get('idle', 0)
-    print(f'Tasks: {\" | \".join(parts) or \"none\"}  Agents: {working} working, {idle} idle')
+    try:
+        issues = json.load(open('$TRACKER_FILE'))['issues']
+        tracker = ' '.join(f\"{i['id']}:{i['status']}\" for i in issues)
+    except Exception:
+        tracker = '?'
+    print(f'Tasks: {\" | \".join(parts) or \"none\"}  Tracker: {tracker}  Agents: {working} working, {idle} idle')
 except:
     print('(waiting for status...)')
 " 2>/dev/null || echo "(daemon unreachable)")
