@@ -3,11 +3,11 @@
     "//": "Copy to plugins.local.json (gitignored) or use ./try-plugin.sh, then ./setup-demo.sh or ./run-ui.sh --restart. Same entries as config.json \"packages\": a spec string, or { \"source\", \"config\" }; relative local paths are relative to this repo. Entries with only a \"//\" key are comments. See README.md \"Trying your own plugins\"."
   },
   {
-    "//": "MPTSimWorkSources (Taskei + SIM-T): run brazil-build in the package first. Replace the placeholders.",
+    "//": "MPTSimWorkSources (Taskei + SIM-T): run brazil-build in the package first. Replace the placeholders, or leave config out and set it up on Config → Sources (Preview, then Save; copy a keeper back here).",
     "source": "~/ws/MPT/src/MPTSimWorkSources",
     "config": {
       "taskei": { "workflowStep": "Implementation", "dryRun": false, "maxItems": 3 },
-      "sim-t": { "resolverGroup": "<your RG>", "dryRun": false, "maxItems": 3 }
+      "sim-t": { "resolverGroup": ["<your RG>"], "dryRun": false, "maxItems": 3 }
     }
   }
 ]

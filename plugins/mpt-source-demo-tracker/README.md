@@ -76,7 +76,25 @@ In the team's `config.json`:
 | `intervalSeconds` | `10` | How often to sync. |
 | `mode` | `work` | `"triage"` makes every issue triage-only (an issue's own `mode` wins). |
 | `urlBase` | `https://tracker.example/browse/` | Prefix of each issue's (fake) link. |
-| `id` / `label` | `demo-tracker` / `Demo Tracker` | Source id and UI tab name. |
+| `id` / `label` | `demo-tracker` / `Demo Tracker` | Source id and UI tab name (not in the form; config.json only). |
+
+## Settings from the UI, preview, on/off
+
+The plugin declares a **`configSchema`** (a small JSON Schema with UI hints — titles,
+descriptions, defaults, `mode` as a drop-down) for everything above but `id` / `label`,
+so my-pizza-team's **Config → Sources → Demo Tracker** shows a form for it (GUIDE.md
+"Setting up a plugin from the UI"):
+
+- **Preview** calls the plugin's **`preview(ctx, draftOptions)`**: the open issues of the
+  draft's `file`, mapped exactly as `sync` maps them — read-only, no write-back, nothing
+  mirrored. An unreadable file or an empty tracker comes back as a warning.
+- **Save** writes the settings into the team's config.json and calls **`init`** again; `init`
+  re-reads `ctx.options()` into the settings every hook uses, so a new `file`, `directory`,
+  `urlBase` or `mode` applies to the next sync without a restart. (`intervalSeconds` is read
+  when the daemon starts its timers; `mode` is a getter on the source, so it reaches new
+  revisions.)
+- **On/off:** the plugin declares no `toggle`, so MPT gives it the default one,
+  `features.demo-tracker`: off = no sync; with mirrors, "Turn off and archive N items".
 
 Or add it with the CLI (from the team dir): `mpt plugins add <path> --config '{"file":"…"}'`.
 Plugins load at daemon startup, so restart the daemon after changing the package

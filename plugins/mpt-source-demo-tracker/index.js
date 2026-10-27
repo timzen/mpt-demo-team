@@ -24,6 +24,15 @@
 // such an item runs (title, prompt, Run = Triage now); the plugin only reports the
 // mode. Write-back still applies, except that a finished triage never closes the
 // issue — it was triaged, not done (see onItemTerminal).
+//
+// Settings from the UI: `configSchema` describes this package's `config` (file,
+// directory, intervalSeconds, mode, urlBase), so MPT's Config → Sources tab shows
+// a form for it; `preview` answers the tab's **Preview** (the open issues a sync
+// would report with the *unsaved* settings — read-only, nothing mirrored); and
+// **Save** writes config.json and calls `init` again, which re-reads
+// `ctx.options()` — so every setting but `intervalSeconds`, `id` and `label`
+// applies without a daemon restart. No `toggle` is declared: MPT gives every
+// external source an on/off switch (`features.demo-tracker`) for free.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -40,21 +49,30 @@ import { WORK_SOURCE_API_VERSION } from "my-pizza-team/plugin";
  * @type {import("my-pizza-team/plugin").PluginFactory}
  */
 export default function demoTracker(options, { teamDir }) {
-  // Settings, with defaults. Paths are relative to the team directory.
-  const file = path.resolve(teamDir, String(options.file ?? "tracker.json"));
-  const directory = options.directory ? path.resolve(teamDir, String(options.directory)) : undefined;
-  const everySeconds = Number(options.intervalSeconds ?? 10);
-  const urlBase = String(options.urlBase ?? "https://tracker.example/browse/");
-  // The source-wide mode ("work" | "triage"); each issue may override it.
-  const sourceMode = options.mode === "triage" ? "triage" : "work";
+  /**
+   * The settings, with defaults. Paths are relative to the team directory.
+   * Read from the factory's `options` first, then from `ctx.options()` on every
+   * `init` (a Save on the Config page) — so keep reading them through `settings`.
+   */
+  function readSettings(opts) {
+    return {
+      file: path.resolve(teamDir, String(opts.file ?? "tracker.json")),
+      directory: opts.directory ? path.resolve(teamDir, String(opts.directory)) : undefined,
+      everySeconds: Number(opts.intervalSeconds ?? 10),
+      urlBase: String(opts.urlBase ?? "https://tracker.example/browse/"),
+      // The source-wide mode ("work" | "triage"); each issue may override it.
+      mode: opts.mode === "triage" ? "triage" : "work",
+    };
+  }
+  let settings = readSettings(options);
 
   /** An issue's effective mode: its own `mode`, else the plugin's. (MPT applies the same rule.) */
   function modeOf(issue) {
-    return issue.mode === "triage" || issue.mode === "work" ? issue.mode : sourceMode;
+    return issue.mode === "triage" || issue.mode === "work" ? issue.mode : settings.mode;
   }
 
   /** @returns {{ issues: Issue[] }} */
-  function readTracker() {
+  function readTracker(file = settings.file) {
     // A missing or broken file is an error: MPT logs it, backs off, and retries
     // (the "external system" is down); it never archives everything.
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -62,14 +80,35 @@ export default function demoTracker(options, { teamDir }) {
     return data;
   }
 
+  /** The open issues as ExternalDefs — what `sync` reports and `preview` shows. */
+  function openIssueDefs(data, s) {
+    return data.issues
+      .filter((issue) => issue.status === "open")
+      .map((issue) => ({
+        externalId: issue.id,
+        // The revision decides "is this a new version to run?". It covers what
+        // the work *is* (title, body, updatedAt) and not the comments we append
+        // ourselves, so our own write-back never re-triggers a run.
+        revision: issue.updatedAt ?? hash([issue.title, issue.body, issue.acceptanceCriteria]),
+        title: issue.title,
+        goal: issue.body ?? issue.title,
+        acceptanceCriteria: issue.acceptanceCriteria,
+        directory: s.directory,
+        url: s.urlBase + encodeURIComponent(issue.id),
+        // Only when the issue sets one; otherwise the source's `mode` applies.
+        // A mode change alone isn't a new revision: it applies from the next run.
+        ...(issue.mode === "triage" || issue.mode === "work" ? { mode: issue.mode } : {}),
+      }));
+  }
+
   /** Read-modify-write one issue. Synchronous, so two write-backs never interleave. */
   function updateIssue(issueId, change, ctx) {
     try {
       const data = readTracker();
       const issue = data.issues.find((i) => i.id === issueId);
-      if (!issue) return ctx.log(`write-back: no issue ${issueId} in ${file}`);
+      if (!issue) return ctx.log(`write-back: no issue ${issueId} in ${settings.file}`);
       change(issue);
-      fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+      fs.writeFileSync(settings.file, JSON.stringify(data, null, 2) + "\n");
     } catch (e) {
       // Write-back is fire-and-forget: log, never throw into the daemon.
       ctx.log(`write-back to ${issueId} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -85,33 +124,86 @@ export default function demoTracker(options, { teamDir }) {
     id: String(options.id ?? "demo-tracker"), // lowercase + dashes; prefixes the mirrored WorkDef ids
     label: String(options.label ?? "Demo Tracker"), // the UI tab's name, and "Open in Demo Tracker"
     apiVersion: WORK_SOURCE_API_VERSION,
-    syncEveryMs: () => everySeconds * 1000,
+    // Read once, when MPT starts its timers: a changed interval applies after a restart.
+    syncEveryMs: () => settings.everySeconds * 1000,
     // Triage mode for every item from this source (an ExternalDef's own `mode` wins).
-    mode: sourceMode,
+    // A getter, so a Save that changes the `mode` setting applies to the next new revision.
+    get mode() {
+      return settings.mode;
+    },
 
+    // The settings form (Config → Sources). A small JSON Schema with UI hints;
+    // MPT also validates Preview / Save against it. `id` / `label` are left out
+    // on purpose: they name the source, so they're set in config.json only.
+    configSchema: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          title: "Tracker file",
+          description: "The tracker's JSON file, relative to the team directory.",
+          default: "tracker.json",
+          minLength: 1,
+        },
+        directory: {
+          type: "string",
+          title: "Working directory",
+          description: "Where teammates work the issues (relative to the team directory). Empty: the team's default.",
+          placeholder: "/path/to/the/project",
+        },
+        intervalSeconds: {
+          type: "integer",
+          title: "Sync interval (seconds)",
+          description: "How often MPT syncs the tracker. Takes effect after a daemon restart.",
+          default: 10,
+          minimum: 1,
+        },
+        mode: {
+          type: "string",
+          title: "Mode",
+          description: "work: a teammate works each issue. triage: a teammate proposes work for it instead (an issue's own mode wins).",
+          enum: ["work", "triage"],
+          default: "work",
+        },
+        urlBase: {
+          type: "string",
+          title: "Link prefix",
+          description: "Each issue's (fake) link is this plus its id.",
+          format: "uri",
+          default: "https://tracker.example/browse/",
+        },
+      },
+    },
+
+    // Called at registration and again after every Save from the Config page:
+    // idempotent — it replaces the settings, it doesn't add to anything.
     init(ctx) {
-      ctx.log(`reading issues from ${file} every ${everySeconds}s`);
+      settings = readSettings(ctx.options());
+      ctx.log(`reading issues from ${settings.file} every ${settings.everySeconds}s (mode: ${settings.mode})`);
     },
 
     // Every open issue, as it reads *now*. MPT diffs this against its mirrors.
     async sync() {
-      return readTracker().issues
-        .filter((issue) => issue.status === "open")
-        .map((issue) => ({
-          externalId: issue.id,
-          // The revision decides "is this a new version to run?". It covers what
-          // the work *is* (title, body, updatedAt) and not the comments we append
-          // ourselves, so our own write-back never re-triggers a run.
-          revision: issue.updatedAt ?? hash([issue.title, issue.body, issue.acceptanceCriteria]),
-          title: issue.title,
-          goal: issue.body ?? issue.title,
-          acceptanceCriteria: issue.acceptanceCriteria,
-          directory,
-          url: urlBase + encodeURIComponent(issue.id),
-          // Only when the issue sets one; otherwise the source's `mode` applies.
-          // A mode change alone isn't a new revision: it applies from the next run.
-          ...(issue.mode === "triage" || issue.mode === "work" ? { mode: issue.mode } : {}),
-        }));
+      return openIssueDefs(readTracker(), settings);
+    },
+
+    // What `sync` would report with the draft settings: read-only (no write-back,
+    // no ctx.upsertDef / enqueue), and a missing or broken file is a warning, not
+    // an error, so the person can fix the path in the form.
+    async preview(ctx, draftOptions) {
+      const draft = readSettings(draftOptions);
+      let data;
+      try {
+        data = readTracker(draft.file);
+      } catch (e) {
+        return { items: [], warnings: [`can't read the tracker: ${e instanceof Error ? e.message : String(e)}`] };
+      }
+      const items = openIssueDefs(data, draft);
+      return {
+        items,
+        ...(items.length ? {} : { warnings: [`no open issues in ${draft.file}`] }),
+        note: `${items.length} open of ${data.issues.length} issue(s) in ${path.basename(draft.file)}`,
+      };
     },
 
     // A mirrored def's parent id is the issue's externalId.

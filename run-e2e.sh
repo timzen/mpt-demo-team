@@ -309,6 +309,120 @@ CREATED_RUNS=$(curl -sf "$DAEMON_URL/api/work-items" | python3 -c "import sys,js
 curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRIAGE_DEF/enqueue" >/dev/null || { err "Triage now on DEMO-3 failed"; exit 1; }
 ok "Triage mode: DEMO-3 triaged (prompt, propose_work, accept → task $CREATED, not run), left open, re-queued"
 
+# ─── Demo-tracker: settings from the UI (Config → Sources) ───────────
+#
+# The plugin declares a configSchema and a preview hook (my-pizza-team GUIDE.md
+# "Setting up a plugin from the UI"). Drive the same routes the Sources tab uses:
+#   1. GET  /api/sources lists demo-tracker with its schema and saved settings;
+#   2. POST /api/sources/demo-tracker/preview with a draft pointing at a scratch
+#      copy of the tracker (plus E2E-1) shows E2E-1 — and mirrors nothing;
+#   3. PUT  /api/sources/demo-tracker/config saves that draft: config.json is
+#      rewritten, the plugin re-initialized live, and the next sync mirrors E2E-1;
+#   4. switching it off is refused while it has mirrors (409); a disconnect
+#      switches it off and archives them, and a sync while it's off pulls nothing;
+#   5. restore: the original settings, switch it back on, DEMO-1..3 come back and
+#      are re-queued for the worker.
+
+log "Checking plugin settings, preview, toggle and disconnect (demo-tracker)..."
+SCRATCH_TRACKER="$DEMO_DIR/tracker/e2e-scratch.json"
+python3 - "$TRACKER_FILE" "$SCRATCH_TRACKER" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+data["issues"].append({"id": "E2E-1", "title": "E2E settings check", "body": "Mirrored only while the e2e points demo-tracker at this file.",
+                       "status": "open", "updatedAt": "2024-07-01T00:00:00Z", "comments": []})
+json.dump(data, open(sys.argv[2], "w"), indent=2)
+PY
+
+source_view() { curl -sf "$DAEMON_URL/api/sources" | python3 -c "
+import sys, json
+s = [s for s in json.load(sys.stdin)['sources'] if s['id'] == '$TRACKER_SOURCE'][0]
+print($1)"; }
+[ "$(source_view "s['kind'], s['configScope'], sorted(s.get('configSchema', {}).get('properties', {})) == sorted(['file','directory','intervalSeconds','mode','urlBase']), s['previewable'], s['toggle']")" \
+  = "plugin package True True {'feature': 'demo-tracker', 'enabled': True}" ] \
+  || { err "GET /api/sources doesn't list demo-tracker with its schema and toggle: $(source_view s)"; exit 1; }
+SAVED_OPTIONS=$(source_view "json.dumps(s['options'])")
+DRAFT_OPTIONS=$(echo "$SAVED_OPTIONS" | python3 -c "import sys,json; o=json.load(sys.stdin); o['file']='../../tracker/e2e-scratch.json'; print(json.dumps(o))")
+ok "GET /api/sources: demo-tracker is a plugin source with a configSchema and its own toggle"
+
+all_defs() { curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs?status=all" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId']+':'+d['status'] for d in json.load(sys.stdin)['defs'])))"; }
+active_defs() { curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId'] for d in json.load(sys.stdin)['defs'])))"; }
+# Wait (up to 10s) for the active mirrors to be exactly $1.
+wait_active_defs() {
+  for i in $(seq 1 20); do
+    [ "$(active_defs)" = "$1" ] && return 0
+    sleep 0.5
+  done
+  return 1
+}
+DEFS_BEFORE=$(all_defs)
+PREVIEW=$(curl -s -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/preview" -H "Content-Type: application/json" -d "{\"options\": $DRAFT_OPTIONS}")
+[ "$(echo "$PREVIEW" | json_field "d['success'], d['via'], sorted(i['externalId'] for i in d['items'])")" = "True preview ['DEMO-1', 'DEMO-2', 'DEMO-3', 'E2E-1']" ] \
+  || { err "Preview with the draft settings didn't show E2E-1: $PREVIEW"; exit 1; }
+[ "$(all_defs)" = "$DEFS_BEFORE" ] || { err "Preview changed the mirrors ($DEFS_BEFORE → $(all_defs))"; exit 1; }
+BAD_PREVIEW=$(http_code -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/preview" -H "Content-Type: application/json" -d '{"options":{"mode":"sometimes"}}')
+[ "$BAD_PREVIEW" = "400" ] || { err "Preview with an invalid mode wasn't refused ($BAD_PREVIEW)"; exit 1; }
+ok "Preview: shows what the draft would pull (E2E-1 included), mirrors nothing, refuses invalid settings"
+
+SAVE=$(curl -s -X PUT "$DAEMON_URL/api/sources/$TRACKER_SOURCE/config" -H "Content-Type: application/json" -d "{\"options\": $DRAFT_OPTIONS}")
+[ "$(echo "$SAVE" | json_field "d['success'], d['reinit']")" = "True [{'id': '$TRACKER_SOURCE', 'ok': True}]" ] || { err "Saving the settings failed: $SAVE"; exit 1; }
+python3 -c "
+import json, sys
+pkgs = json.load(open('$TEAM_DIR/.my-pizza-team/config.json'))['packages']
+sys.exit(0 if any(isinstance(p, dict) and p.get('config', {}).get('file') == '../../tracker/e2e-scratch.json' for p in pkgs) else 1)" \
+  || { err "Save didn't write packages[].config.file to config.json"; exit 1; }
+# The re-init syncs at once; force one too (a 409 "in-flight" just means that one's running).
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+wait_active_defs "DEMO-1 DEMO-2 DEMO-3 E2E-1" || { err "The sync after the Save doesn't reflect it: $(active_defs)"; exit 1; }
+ok "Save: config.json updated, plugin re-initialized without a restart, next sync mirrored E2E-1"
+
+FEATURES_OFF_CODE=$(curl -sf "$DAEMON_URL/api/config" | python3 -c "
+import sys, json
+b = json.load(sys.stdin)
+for k in ('featureUsage', 'featureSources', 'defaultNouns'): b.pop(k, None)
+b['features'] = {'$TRACKER_SOURCE': False}
+print(json.dumps(b))" | curl -s -o /dev/null -w "%{http_code}" -X PUT "$DAEMON_URL/api/config" -H "Content-Type: application/json" -d @-)
+[ "$FEATURES_OFF_CODE" = "409" ] || { err "Switching demo-tracker off with active mirrors wasn't refused ($FEATURES_OFF_CODE)"; exit 1; }
+DISCONNECT=$(curl -s -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/disconnect")
+[ "$(echo "$DISCONNECT" | json_field "d['success'], d['feature'], len(d['archived'])")" = "True $TRACKER_SOURCE 4" ] || { err "Disconnect failed: $DISCONNECT"; exit 1; }
+# Its defs route is gated now (403), so read the mirrors' workdef.md files.
+STILL_ACTIVE=$(grep -L "^status: archived" "$TEAM_DIR/.my-pizza-team/tasks/$TRACKER_SOURCE~"*/workdef.md || true)
+[ -z "$STILL_ACTIVE" ] || { err "Disconnect left active mirrors: $STILL_ACTIVE"; exit 1; }
+[ "$(http_code "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs")" = "403" ] || { err "demo-tracker's Work routes aren't gated while it's off"; exit 1; }
+[ "$(source_view "s['toggle']['enabled']")" = "False" ] || { err "demo-tracker is still on after the disconnect"; exit 1; }
+# While off: a new issue isn't pulled, by a forced sync (refused) or the 10s timer.
+python3 - "$SCRATCH_TRACKER" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+data["issues"].append({"id": "E2E-2", "title": "Must not be pulled while off", "status": "open", "updatedAt": "2024-07-02T00:00:00Z", "comments": []})
+json.dump(data, open(sys.argv[1], "w"), indent=2)
+PY
+# (Its Work routes are gated while it's off, so look at /api/sources and the mirror files.)
+LAST_SYNC_AT=$(source_view "(s['sync']['last'] or {}).get('at')")
+OFF_SYNC=$(http_code -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync")
+[ "$OFF_SYNC" != "200" ] || { err "A switched-off demo-tracker still synced"; exit 1; }
+sleep 12
+[ "$(source_view "(s['sync']['last'] or {}).get('at')")" = "$LAST_SYNC_AT" ] || { err "demo-tracker synced while switched off"; exit 1; }
+[ ! -e "$TEAM_DIR/.my-pizza-team/tasks/$TRACKER_SOURCE~E2E-2" ] || { err "demo-tracker pulled E2E-2 while switched off"; exit 1; }
+ok "Off: switch-off refused while it has mirrors (409); disconnect archived 4 mirrors; no sync while off ($OFF_SYNC)"
+
+# Restore the fixture settings and switch it back on (the Sources tab's checkbox).
+RESTORE=$(curl -s -X PUT "$DAEMON_URL/api/sources/$TRACKER_SOURCE/config" -H "Content-Type: application/json" -d "{\"options\": $SAVED_OPTIONS}")
+[ "$(echo "$RESTORE" | json_field "d['success']")" = "True" ] || { err "Restoring the settings failed: $RESTORE"; exit 1; }
+ON_CODE=$(curl -sf "$DAEMON_URL/api/config" | python3 -c "
+import sys, json
+b = json.load(sys.stdin)
+for k in ('featureUsage', 'featureSources', 'defaultNouns'): b.pop(k, None)
+b['features'] = {'$TRACKER_SOURCE': True}
+print(json.dumps(b))" | curl -s -o /dev/null -w "%{http_code}" -X PUT "$DAEMON_URL/api/config" -H "Content-Type: application/json" -d @-)
+[ "$ON_CODE" = "200" ] || { err "Switching demo-tracker back on failed ($ON_CODE)"; exit 1; }
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+wait_active_defs "DEMO-1 DEMO-2 DEMO-3" || { err "Switching back on didn't restore DEMO-1..3 (active: $(active_defs))"; exit 1; }
+for issue in DEMO-1 DEMO-2 DEMO-3; do
+  curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~$issue/enqueue" >/dev/null || { err "Re-queuing $issue failed"; exit 1; }
+done
+rm -f "$SCRATCH_TRACKER"
+ok "Back on: fixture settings restored, DEMO-1..3 back and re-queued (E2E-1 stays archived)"
+
 # ─── Launch Pi Leader ─────────────────────────────────────────────────
 
 log "Launching Pi leader in tmux..."

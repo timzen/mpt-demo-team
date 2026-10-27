@@ -92,9 +92,13 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
   never closes a triage-mode issue. Seed issue **DEMO-3** is the example.
 - Watch it: Work → **Demo Tracker** tab, `mpt plugins list` (from `demo/team`),
   `GET /api/work-sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
+- **Settings UI:** it declares a `configSchema` + `preview`, and `init` re-reads
+  `ctx.options()` (idempotent) — so Config → Sources edits, previews and saves it live
 - `run-e2e.sh` checks it loaded, mirrored + enqueued all three issues, that write-back reaches
-  the file, and DEMO-3's triage end to end through the API (claim → triage prompt →
-  `/proposals` → COMPLETE → accept creates a task that never runs → Triage now)
+  the file, DEMO-3's triage end to end through the API (claim → triage prompt →
+  `/proposals` → COMPLETE → accept creates a task that never runs → Triage now), and the
+  Config → Sources routes (GET /api/sources schema; preview mirrors nothing; PUT config
+  re-inits + next sync reflects it; switch-off 409 → disconnect archives; restore + re-queue)
 
 Keep the plugin plain JavaScript (no build step), small, and well commented — it's
 a teaching example. Plugins load at daemon startup, so restart after changing it.

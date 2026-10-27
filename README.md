@@ -117,7 +117,10 @@ the WorkItem/WorkDef model.
 README and my-pizza-team `GUIDE.md` "Writing a Work Source plugin"): a fake,
 offline issue tracker backed by `demo/tracker/tracker.json`. The team's
 `config.json` lists it under `packages` by local path — loaded in place, no
-install — with `config: { file, directory, intervalSeconds }`.
+install — with `config: { file, directory, intervalSeconds }`. It declares a
+`configSchema` and a `preview` hook, so **Config → Sources → Demo Tracker** edits
+those settings in a form, previews the open issues a file would yield, and saves
+without a restart (only `intervalSeconds` waits for one).
 
 Every 10s it syncs the tracker's **open** issues into MPT, which mirrors each
 (read-only) and enqueues one run per revision. The seed has two issues against
@@ -149,8 +152,9 @@ How to watch it:
 - **Write-back:** comment on an issue in the UI, or let a teammate finish one, then
   look at the tracker file.
 
-Plugins load at daemon startup, so a change to the plugin code or its `packages`
-entry needs a daemon restart (the tracker file itself doesn't).
+Plugins load at daemon startup, so a change to the plugin code, or a hand edit of its
+`packages` entry, needs a daemon restart (the tracker file itself doesn't, nor does a
+Save on Config → Sources, which re-inits the plugin live).
 
 ## Trying your own plugins
 
@@ -236,6 +240,32 @@ path. It isn't installed — it loads in place — so build it yourself first:
 - `run-e2e.sh` ignores plugins.local.json (it runs setup with
   `MPT_DEMO_NO_LOCAL_PLUGINS=1`), so e2e stays deterministic.
 
+**Setting it up from the UI.** Once a plugin is installed and loaded, you don't
+have to edit `--config` JSON by hand: open **Config → Sources**
+(`http://localhost:<port>/config/sources`) in the sandbox (my-pizza-team GUIDE.md
+"Setting up a plugin from the UI"):
+
+1. Pick the source. A plugin that declares a `configSchema` (MPTSimWorkSources'
+   `sim-t` and `Taskei`, and the demo-tracker) gets a form — titles, help text,
+   defaults; otherwise a JSON editor.
+2. **Preview** shows what a sync would pull with the settings on screen, *unsaved*:
+   the items, warnings ("not configured: set resolverGroup", "run mwinit", a bad
+   value), and nothing is mirrored, queued or written back. Iterate here with
+   `dryRun` still on.
+3. **Save** writes the settings into `demo/team/.my-pizza-team/config.json`
+   (`packages[].config`) and re-initializes the plugin live — no `--restart`.
+4. Its checkbox in the list switches it on/off (stops syncing). Switching off a
+   source that has mirrored items offers **Turn off and archive N items** (a
+   disconnect: mirrors archived, queued runs canceled); switch it back on to get
+   them back.
+
+A UI Save lands in the demo's config.json, which **the next `setup-demo.sh` /
+`run-ui.sh --restart` rebuilds** from the fixtures + `plugins.local.json`. To keep
+settings you found in the UI, copy the source's block into its `plugins.local.json`
+entry (or `./try-plugin.sh <spec> --config '<json>' --no-start`). `--config` on the
+command line is still the way to give a plugin its *first* settings, before the
+daemon (and the UI) is up; then refine them in the UI.
+
 **UI only vs with agents.** `run-ui.sh` starts no teammates: you see what the
 plugin mirrors and enqueues, and can comment / cancel / Sync now, but nothing
 runs. To have work done, run `run-e2e.sh`-style agents (or `pi --ppt-worker`)
@@ -299,9 +329,18 @@ This will:
    then play a teammate on the triage-mode **DEMO-3** through the agent API (triage
    prompt, a `propose_work`-style analysis, COMPLETE), accept its proposal (a task is
    created, not run; the issue stays open), and re-queue it with Triage now
-4. Launch a Pi leader in a tmux session
-5. Spawn a worker agent pointed at `demo/project/`
-6. Monitor task progress (and the tracker issues' statuses) until you Ctrl+C
+4. Exercise the Config → Sources routes on the demo-tracker: `GET /api/sources` lists
+   it with its `configSchema` and toggle; a **preview** with draft settings (pointing
+   at a scratch copy of the tracker with an extra issue, E2E-1) shows E2E-1 without
+   mirroring anything, and invalid settings get a 400; a **Save** (`PUT
+   /api/sources/demo-tracker/config`) rewrites config.json, re-inits the plugin live,
+   and the next sync mirrors E2E-1; switching it off is refused (409) while it has
+   mirrors, a **disconnect** switches it off and archives them, and no sync runs while
+   it's off; finally the fixture settings are restored, it's switched back on, and
+   DEMO-1..3 come back and are re-queued
+5. Launch a Pi leader in a tmux session
+6. Spawn a worker agent pointed at `demo/project/`
+7. Monitor task progress (and the tracker issues' statuses) until you Ctrl+C
 
 Prerequisites: `pi`, `node` 24+, `tmux`, and the Pi extension installed (`mpt setup`).
 
