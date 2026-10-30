@@ -21,6 +21,14 @@
         "directory": "__DEMO_PROJECT__",
         "intervalSeconds": 10
       }
+    },
+    {
+      "source": "../../../plugins/mpt-personas-demo"
     }
-  ]
+  ],
+  "sourcePersonas": {
+    "demo-tracker": {
+      "triagePersona": "mpt-personas-demo/tracker-triager"
+    }
+  }
 }

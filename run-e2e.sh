@@ -2,8 +2,12 @@
 #
 # run-e2e.sh — End-to-end test run for MPT.
 #
-# Sets up the demo, starts the daemon, launches a Pi leader,
-# and spawns a worker agent to execute tasks.
+# First checks the persona migration on the pre-persona team layout
+# (./setup-demo.sh --legacy: start the daemon, check what it migrated, restart it
+# to prove the migration is idempotent). Then sets up the demo, starts the
+# daemon, checks the persona library, the persona packages and the tracker's
+# per-source / per-item personas (each run's prompt and recorded persona),
+# launches a Pi leader, and spawns a worker agent to execute tasks.
 #
 # Prerequisites:
 #   - `pi` installed globally (npm i -g @earendil-works/pi-coding-agent)
@@ -120,13 +124,118 @@ fi
 
 ok "All dependencies found"
 
-# ─── Setup Demo ──────────────────────────────────────────────────────
+# ─── Daemon helpers ──────────────────────────────────────────────────
+
+DAEMON_LOG="$DEMO_DIR/daemon.log"
+json_field() { python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
+http_code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
+
+# Start the daemon from source in the background (output appended to
+# $DAEMON_LOG) and wait for /health. Sets DAEMON_PID.
+start_daemon() {
+  cd "$MPT_SOURCE"
+  TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
+    node daemon/main.ts >> "$DAEMON_LOG" 2>&1 &
+  DAEMON_PID=$!
+  cd "$SCRIPT_DIR"
+  for i in $(seq 1 30); do
+    if curl -sf "$DAEMON_URL/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 $DAEMON_PID 2>/dev/null; then
+      err "Daemon process exited unexpectedly; see $DAEMON_LOG"
+      exit 1
+    fi
+    sleep 0.5
+  done
+  err "Daemon failed to start within 15 seconds; see $DAEMON_LOG"
+  exit 1
+}
+
+# Stop the daemon start_daemon started and wait for the port to be released.
+stop_daemon() {
+  kill "$DAEMON_PID" 2>/dev/null || true
+  wait "$DAEMON_PID" 2>/dev/null || true
+  for i in $(seq 1 20); do
+    lsof -ti :$DAEMON_PORT >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+}
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  🍕 MPT End-to-End Test Run"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+
+# ─── Persona migration (the legacy layout) ───────────────────────────
+#
+# fixtures/team-legacy is a pre-persona team (my-pizza-team docs/DESIGN.md
+# "Migration: on load, lossless, idempotent"): a workflow state .md file,
+# triage.md, a context library (a persona-tagged entry, an entry attached to a
+# story and to a Solitary task, an unattached one), and the demo-tracker in
+# source-wide triage mode with no triage persona. Start the daemon on it, check
+# each step's result, then restart it and check the second start changes nothing.
+
+log "Checking the persona migration on the legacy layout (./setup-demo.sh --legacy)..."
+MPT_DEMO_NO_LOCAL_PLUGINS=1 "$SCRIPT_DIR/setup-demo.sh" --legacy > /dev/null
+LEGACY_TEAM="$TEAM_DIR/.my-pizza-team"
+start_daemon
+
+python3 - "$LEGACY_TEAM" <<'PY' || { err "The legacy team wasn't migrated as expected; see $DAEMON_LOG"; exit 1; }
+import json, os, sys
+team = sys.argv[1]
+def read(p): return open(os.path.join(team, p)).read()
+def gone(p): return not os.path.exists(os.path.join(team, p))
+def fail(m): print(f"  ✗ {m}", file=sys.stderr); sys.exit(1)
+cfg = json.loads(read("config.json"))
+wf = json.loads(read("workflows/default/workflow.json"))
+# 1. the workflow state file → persona <wf>-<state>, selected by the state
+state = [s for s in wf["states"] if s["name"] == "in_progress"][0]
+if state.get("persona") != "default-in-progress": fail(f"in_progress state persona: {state.get('persona')}")
+if not gone("workflows/default/in_progress.md"): fail("in_progress.md is still there")
+if "Run tests with `npm test`" not in read("personas/default-in-progress.md"): fail("default-in-progress lost the state file's text")
+# 2. triage.md → persona triage + config triage.persona
+if (cfg.get("triage") or {}).get("persona") != "triage": fail(f"triage.persona: {cfg.get('triage')}")
+if not gone("triage.md"): fail("triage.md is still there")
+# 3. the triage-mode source keeps what it ran with: the team's triage persona
+if (cfg.get("sourcePersonas") or {}).get("demo-tracker", {}).get("triagePersona") != "triage": fail(f"sourcePersonas: {cfg.get('sourcePersonas')}")
+# 4. the persona-tagged context entry → a team persona
+if "pair programmer" not in read("personas/pair-programmer.md"): fail("pair-programmer persona missing")
+# 6. attached context inlined into Additional Context (the story's onto its task, and the task's own); attachments dropped
+for t in ("add-user-auth-1", "audit-project-dependencies"):
+    md = read(f"tasks/{t}/workdef.md")
+    if "### Reference: Project Conventions (from the former context library, `project-conventions`)" not in md: fail(f"{t}: project-conventions wasn't inlined")
+    if "Error responses:" not in md: fail(f"{t}: the inlined entry lost its text")
+    if "contextRefs" in md: fail(f"{t}: contextRefs is still there")
+if "context" in json.loads(read("stories/add-user-auth.json")): fail("the story still has context")
+# 7. context/ archived (with a README), nothing deleted
+if not gone("context"): fail("context/ is still there")
+archived = sorted(os.listdir(os.path.join(team, "context.migrated")))
+if archived != ["README.md", "pair-programmer.md", "project-conventions.md", "release-checklist.md"]: fail(f"context.migrated/: {archived}")
+PY
+LEGACY_PERSONAS=$(curl -sf "$DAEMON_URL/api/personas" | json_field "' '.join(sorted(p['id'] for p in d['personas'] if p['origin']['kind'] == 'team'))")
+[ "$LEGACY_PERSONAS" = "default-in-progress pair-programmer triage" ] || { err "GET /api/personas after the migration lists team personas '$LEGACY_PERSONAS'"; exit 1; }
+LEGACY_NOTICE=$(curl -sf "$DAEMON_URL/api/status" | json_field "' | '.join(n['message'] for n in d.get('notices', []))")
+case "$LEGACY_NOTICE" in
+  *"context library was removed"*"1 unattached entry is in context.migrated/"*) ;;
+  *) err "No context-library notice on /api/status (got: '$LEGACY_NOTICE')"; exit 1 ;;
+esac
+[ "$(http_code "$DAEMON_URL/api/context")" = "410" ] || { err "/api/context isn't 410 Gone"; exit 1; }
+
+# Idempotent: a second start changes no migrated file.
+legacy_snapshot() {
+  (cd "$LEGACY_TEAM" && find config.json personas workflows stories tasks/add-user-auth-1/workdef.md tasks/audit-project-dependencies/workdef.md context.migrated* -type f -print0 | sort -z | xargs -0 md5sum)
+}
+BEFORE_RESTART=$(legacy_snapshot)
+stop_daemon
+start_daemon
+AFTER_RESTART=$(legacy_snapshot)
+[ "$BEFORE_RESTART" = "$AFTER_RESTART" ] || { err "The migration isn't idempotent: a restart changed files"; diff <(echo "$BEFORE_RESTART") <(echo "$AFTER_RESTART") >&2 || true; exit 1; }
+stop_daemon
+ok "Migration: state file, triage.md, tagged entry → personas; triage-mode source seeded; context inlined + archived; notice; 410; idempotent"
+
+# ─── Setup Demo ──────────────────────────────────────────────────────
 
 log "Setting up demo fixtures..."
 # Without plugins.local.json (your own plugins; see ./try-plugin.sh), so e2e
@@ -137,32 +246,7 @@ ok "Demo fixtures in place"
 # ─── Start Daemon ────────────────────────────────────────────────────
 
 log "Starting MPT daemon on port $DAEMON_PORT..."
-
-# Run daemon from source in background, capture output to log
-DAEMON_LOG="$DEMO_DIR/daemon.log"
-cd "$MPT_SOURCE"
-TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
-  node daemon/main.ts > "$DAEMON_LOG" 2>&1 &
-DAEMON_PID=$!
-cd "$SCRIPT_DIR"
-
-# Wait for daemon to be ready
-for i in $(seq 1 30); do
-  if curl -sf "$DAEMON_URL/health" >/dev/null 2>&1; then
-    break
-  fi
-  if ! kill -0 $DAEMON_PID 2>/dev/null; then
-    err "Daemon process exited unexpectedly"
-    exit 1
-  fi
-  sleep 0.5
-done
-
-if ! curl -sf "$DAEMON_URL/health" >/dev/null 2>&1; then
-  err "Daemon failed to start within 15 seconds"
-  exit 1
-fi
-
+start_daemon
 ok "Daemon running (PID $DAEMON_PID)"
 
 # ─── Verify Story Loaded ─────────────────────────────────────────────
@@ -186,8 +270,6 @@ ok "Story loaded: $STORY_COUNT story, $TASK_COUNT tasks"
 # Activated with enqueue:false and then deleted, so it doesn't add work to the demo.
 
 log "Checking pending → activate..."
-json_field() { python3 -c "import sys,json; d=json.load(sys.stdin); print($1)"; }
-http_code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
 PENDING_ID=$(curl -sf -X POST "$DAEMON_URL/api/work-defs" -H "Content-Type: application/json" \
   -d '{"title":"E2E pending check","goal":"never runs","pending":true}' | json_field "d['workDef']['id']")
 pending_items() {
@@ -252,6 +334,99 @@ tracker_has_comment DEMO-2 "ended CANCELED" || { err "Canceled run wasn't writte
 curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-2/enqueue" >/dev/null || { err "Re-running DEMO-2 failed"; exit 1; }
 ok "Write-back lands in the tracker file (comment, canceled run); DEMO-2 re-queued"
 
+# ─── Personas: the library, packages, and the tracker's personas ─────
+#
+# my-pizza-team docs/DESIGN.md "Personas: One Library, Selected by Reference".
+# The fixture has one team persona (demo-coder, selected by the in_progress
+# state), two packages shipping personas (plugins/mpt-personas-demo: personas
+# only; the demo-tracker: its own tracker-worker, named as its defaultPersona),
+# a Solitary task with a persona, and a per-source triage persona for the
+# tracker (config.json sourcePersonas). Then each tracker item's run must get
+# the persona its chain selects, and record it on the WorkItem:
+#   DEMO-1 — a per-item override set here (via "workdef")
+#   DEMO-2 — the source's declared default (via "source-default")
+#   DEMO-3 — the per-source triage persona (via "source-setting"; next section)
+# DEMO-1 and DEMO-2 are claimed as an unregistered agent and completed, then
+# reopened in the tracker file (a new revision), so the worker still gets them.
+
+log "Checking the persona library and persona packages..."
+PERSONA_IDS=$(curl -sf "$DAEMON_URL/api/personas" | json_field "' '.join(sorted(p['id'] + ':' + p['origin']['kind'] + ':' + str(p['readOnly']) for p in d['personas']))")
+EXPECTED_PERSONAS="builtin:assistant:builtin:True builtin:triage:builtin:True builtin:worker:builtin:True demo-coder:team:False mpt-personas-demo/careful-implementer:package:True mpt-personas-demo/careful-reviewer:package:True mpt-personas-demo/tracker-triager:package:True mpt-source-demo-tracker/tracker-worker:package:True"
+[ "$PERSONA_IDS" = "$EXPECTED_PERSONAS" ] || { err "GET /api/personas: $PERSONA_IDS"; exit 1; }
+PERSONAS_PLUGIN=$(curl -sf "$DAEMON_URL/api/work-sources" | json_field "[(p['state'], len(p['sources']), len(p['personas'])) for p in d['plugins'] if p['spec'].endswith('mpt-personas-demo')]")
+[ "$PERSONAS_PLUGIN" = "[('loaded', 0, 3)]" ] || { err "mpt-personas-demo didn't load as a persona-only package: $PERSONAS_PLUGIN"; exit 1; }
+
+REVIEWER="mpt-personas-demo%2Fcareful-reviewer"
+[ "$(http_code -X PUT "$DAEMON_URL/api/personas/$REVIEWER" -H "Content-Type: application/json" -d '{"content":"edited"}')" = "409" ] || { err "A package persona was editable"; exit 1; }
+[ "$(http_code -X DELETE "$DAEMON_URL/api/personas/$REVIEWER")" = "409" ] || { err "A package persona was deletable"; exit 1; }
+COPY=$(curl -sf -X POST "$DAEMON_URL/api/personas/$REVIEWER/duplicate" -H "Content-Type: application/json" -d '{}' | json_field "d['persona']['id'], d['persona']['readOnly'], d['persona'].get('duplicatedFrom')")
+[ "$COPY" = "careful-reviewer False mpt-personas-demo/careful-reviewer" ] || { err "Duplicating a package persona: $COPY"; exit 1; }
+curl -sf -X DELETE "$DAEMON_URL/api/personas/careful-reviewer" >/dev/null || { err "Deleting the duplicate failed"; exit 1; }
+[ "$(http_code -X DELETE "$DAEMON_URL/api/personas/demo-coder")" = "409" ] || { err "Deleting a persona in use wasn't refused"; exit 1; }
+
+used_by() { curl -sf "$DAEMON_URL/api/personas/$1" | json_field "' '.join(sorted(u['kind'] + ':' + (u.get('state') or u.get('workDefId') or u.get('source') or '') for u in d['usedBy']))"; }
+[ "$(used_by demo-coder)" = "workflow-state:in_progress" ] || { err "demo-coder isn't used by the in_progress state: $(used_by demo-coder)"; exit 1; }
+[ "$(used_by "$REVIEWER")" = "workdef:audit-project-dependencies" ] || { err "careful-reviewer isn't used by the Solitary audit task: $(used_by "$REVIEWER")"; exit 1; }
+[ "$(used_by mpt-personas-demo%2Ftracker-triager)" = "source-setting:demo-tracker" ] || { err "tracker-triager isn't demo-tracker's triage persona: $(used_by mpt-personas-demo%2Ftracker-triager)"; exit 1; }
+TRACKER_PERSONAS=$(curl -sf "$DAEMON_URL/api/sources" | json_field "[(s['defaultPersona'], s['triagePersona'], s.get('personaError')) for s in d['sources'] if s['id'] == '$TRACKER_SOURCE']")
+[ "$TRACKER_PERSONAS" = "[('mpt-source-demo-tracker/tracker-worker', 'mpt-personas-demo/tracker-triager', None)]" ] || { err "demo-tracker's personas on GET /api/sources: $TRACKER_PERSONAS"; exit 1; }
+[ ! -e "$TEAM_DIR/.my-pizza-team/context.migrated" ] || { err "The persona-layout fixture was migrated (context.migrated/ exists)"; exit 1; }
+ok "Personas: library lists team + built-in + package personas; package ones read-only (duplicate to edit); Used by; tracker default + triage persona"
+
+log "Checking the tracker items' personas (prompt + recorded persona)..."
+PERSONA_AGENT="e2e-persona-check"
+IMPLEMENTER="mpt-personas-demo/careful-implementer"
+[ "$(http_code -X PUT "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-1/persona" -H "Content-Type: application/json" -d '{"persona":"no-such-persona"}')" = "400" ] \
+  || { err "A per-item override naming a missing persona wasn't refused"; exit 1; }
+curl -sf -X PUT "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-1/persona" -H "Content-Type: application/json" -d "{\"persona\":\"$IMPLEMENTER\"}" >/dev/null \
+  || { err "Setting DEMO-1's persona override failed"; exit 1; }
+
+ready_item() { curl -sf "$DAEMON_URL/api/work-items?state=READY" | python3 -c "
+import sys, json
+items = [i['id'] for i in json.load(sys.stdin)['items'] if i['ref']['workDefId'] == '$TRACKER_SOURCE~$1']
+print(items[0] if items else '')"; }
+item_persona() { curl -sf "$DAEMON_URL/api/work-items/$1" | json_field "(lambda p: p and (p['id'], p['origin'], p['via']))(d['item'].get('persona'))"; }
+# claim_check <issue> <text the prompt must contain> <expected "(id, origin, via)"> — claims, checks, completes.
+claim_check() {
+  local item; item=$(ready_item "$1")
+  [ -n "$item" ] || { err "No READY WorkItem for $1"; exit 1; }
+  curl -sf -X POST "$DAEMON_URL/api/agents/claim/$item" -H "Content-Type: application/json" -d "{\"agentId\":\"$PERSONA_AGENT\"}" \
+    | python3 -c "import sys,json; p=json.load(sys.stdin)['prompt']; sys.exit(0 if p.startswith('## Your Role') and sys.argv[1] in p else 1)" "$2" \
+    || { err "$1's prompt doesn't carry its persona ('$2')"; exit 1; }
+  [ "$(item_persona "$item")" = "$3" ] || { err "$1's run recorded persona $(item_persona "$item"), expected $3"; exit 1; }
+  curl -sf -X POST "$DAEMON_URL/api/agents/work-items/$item/state" -H "Content-Type: application/json" \
+    -d "{\"agentId\":\"$PERSONA_AGENT\",\"state\":\"COMPLETE\"}" >/dev/null || { err "Completing $1 failed"; exit 1; }
+  eval "$4=$item"
+}
+claim_check DEMO-1 "You are a **careful implementer**" "('$IMPLEMENTER', 'package:mpt-personas-demo', 'workdef')" DEMO1_RUN
+claim_check DEMO-2 "You are working an issue from the **Demo Tracker**" "('mpt-source-demo-tracker/tracker-worker', 'package:mpt-source-demo-tracker', 'source-default')" DEMO2_RUN
+
+# Reopen both in the tracker (status open + a new updatedAt = a new revision) once
+# the completions are written back, and sync: both are mirrored and queued again.
+for i in $(seq 1 20); do
+  [ "$(python3 -c "import json; print(' '.join(i['status'] for i in json.load(open('$TRACKER_FILE'))['issues'] if i['id'] in ('DEMO-1','DEMO-2')))")" = "done done" ] && break
+  sleep 0.5
+done
+python3 - "$TRACKER_FILE" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+for issue in data["issues"]:
+    if issue["id"] in ("DEMO-1", "DEMO-2"):
+        issue["status"], issue["updatedAt"] = "open", issue["updatedAt"].replace("2024-06-01", "2024-06-02")
+json.dump(data, open(sys.argv[1], "w"), indent=2)
+PY
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+for i in $(seq 1 30); do
+  [ -n "$(ready_item DEMO-1)" ] && [ -n "$(ready_item DEMO-2)" ] && break
+  sleep 0.5
+done
+[ -n "$(ready_item DEMO-1)" ] && [ -n "$(ready_item DEMO-2)" ] || { err "Reopened DEMO-1/DEMO-2 weren't queued again"; exit 1; }
+OVERRIDE=$(curl -sf "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~DEMO-1" | json_field "d['workDef']['mirror'].get('personaOverride')")
+[ "$OVERRIDE" = "$IMPLEMENTER" ] || { err "DEMO-1's persona override didn't survive the re-sync ($OVERRIDE)"; exit 1; }
+# The finished runs keep the persona they ran with (the run history's snapshot).
+[ "$(item_persona "$DEMO1_RUN")" = "('$IMPLEMENTER', 'package:mpt-personas-demo', 'workdef')" ] || { err "DEMO-1's finished run lost its persona"; exit 1; }
+ok "Tracker personas: DEMO-1 per-item override, DEMO-2 source default — in each prompt and on each run; override kept across re-sync; both re-queued"
+
 # ─── Demo-tracker: a triage-mode issue ───────────────────────────────
 #
 # DEMO-3 has "mode": "triage" (my-pizza-team docs/DESIGN.md "External sources" —
@@ -277,8 +452,11 @@ curl -sf -X POST "$DAEMON_URL/api/agents/claim/$DEMO3_ITEM" -H "Content-Type: ap
   -d "{\"agentId\":\"$TRIAGER\"}" | python3 -c "
 import sys, json
 p = json.load(sys.stdin)['prompt']
-sys.exit(0 if '## Your Role: Triage' in p and 'DEMO-3' in p and 'due date' in p else 1)" \
-  || { err "DEMO-3's claim prompt isn't the triage prompt"; exit 1; }
+sys.exit(0 if '## Your Role: Triage' in p and 'You are the **tracker triager**' in p and 'DEMO-3' in p and 'due date' in p else 1)" \
+  || { err "DEMO-3's claim prompt isn't the triage prompt with the tracker-triager persona"; exit 1; }
+# Its triage persona is the per-source setting (config.json sourcePersonas) — in the prompt and on the run.
+[ "$(item_persona "$DEMO3_ITEM")" = "('mpt-personas-demo/tracker-triager', 'package:mpt-personas-demo', 'source-setting')" ] \
+  || { err "DEMO-3's run recorded persona $(item_persona "$DEMO3_ITEM"), not the per-source triage persona"; exit 1; }
 
 PROPOSE_CODE=$(http_code -X POST "$DAEMON_URL/api/agents/work-items/$DEMO3_ITEM/proposals" -H "Content-Type: application/json" -d "{
   \"agentId\": \"$TRIAGER\", \"outcome\": \"proposals\",
@@ -307,7 +485,7 @@ CREATED_RUNS=$(curl -sf "$DAEMON_URL/api/work-items" | python3 -c "import sys,js
 [ "$(triage_view "d['badge'], len(d['pending'])")" = "none 0" ] || { err "DEMO-3 still shows a pending proposal after accepting"; exit 1; }
 
 curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRIAGE_DEF/enqueue" >/dev/null || { err "Triage now on DEMO-3 failed"; exit 1; }
-ok "Triage mode: DEMO-3 triaged (prompt, propose_work, accept → task $CREATED, not run), left open, re-queued"
+ok "Triage mode: DEMO-3 triaged (prompt + per-source triage persona, propose_work, accept → task $CREATED, not run), left open, re-queued"
 
 # ─── Demo-tracker: settings from the UI (Config → Sources) ───────────
 #
@@ -502,6 +680,30 @@ else
   exit 1
 fi
 
+# ─── The worker's in-flight persona ──────────────────────────────────
+#
+# Once the worker claims something, GET /api/agents carries the persona its run
+# recorded at claim (the UI's ✦ chip): demo-coder for a board task (the
+# in_progress state's persona), the tracker's for a tracker item. The worker's
+# pace is up to the model, so this waits up to 2 minutes and only warns.
+
+log "Waiting for the worker's in-flight persona (GET /api/agents)..."
+worker_persona() { curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "
+import sys, json
+w = [a for a in json.load(sys.stdin).get('agents', []) if a['id'] != 'leader' and a.get('persona')]
+print(f\"{w[0]['name']} is working {w[0]['workItemId']} as '{w[0]['persona']['title']}' ({w[0]['persona']['id']}, via {w[0]['persona']['via']})\" if w else '')" 2>/dev/null || true; }
+WORKER_PERSONA=""
+for i in $(seq 1 60); do
+  WORKER_PERSONA=$(worker_persona)
+  [ -n "$WORKER_PERSONA" ] && break
+  sleep 2
+done
+if [ -n "$WORKER_PERSONA" ]; then
+  ok "In-flight persona: $WORKER_PERSONA"
+else
+  warn "The worker hasn't claimed work with a persona yet (check: tmux attach -t $TMUX_SESSION)"
+fi
+
 # ─── Status Summary ──────────────────────────────────────────────────
 
 echo ""
@@ -519,7 +721,8 @@ echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:     'Add User Authentication' (3 tasks)"
 echo "  Tracker:   $TRACKER_FILE (demo-tracker plugin: DEMO-1, DEMO-2; DEMO-3 triage-mode)"
-echo "  Workflow:  todo → in_progress → review → done"
+echo "  Workflow:  todo → in_progress → review → done (in_progress persona: demo-coder)"
+echo "  Personas:  $DAEMON_URL/config/personas (team demo-coder; packages mpt-personas-demo, mpt-source-demo-tracker)"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
@@ -542,7 +745,7 @@ echo ""
 while true; do
   STATUS=$(curl -sf "$DAEMON_URL/api/status" 2>/dev/null || echo "{}")
   TASKS_BY_STATUS=$(echo "$STATUS" | python3 -c "
-import sys, json
+import sys, json, urllib.request
 try:
     d = json.load(sys.stdin)
     by_status = d.get('tasks', {}).get('byStatus', {})
@@ -555,7 +758,12 @@ try:
         tracker = ' '.join(f\"{i['id']}:{i['status']}\" for i in issues)
     except Exception:
         tracker = '?'
-    print(f'Tasks: {\" | \".join(parts) or \"none\"}  Tracker: {tracker}  Agents: {working} working, {idle} idle')
+    try:
+        agents_list = json.load(urllib.request.urlopen('$DAEMON_URL/api/agents', timeout=2)).get('agents', [])
+        personas = ', '.join(f\"{a['name']}✦{a['persona']['title']}\" for a in agents_list if a.get('persona'))
+    except Exception:
+        personas = ''
+    print(f'Tasks: {\" | \".join(parts) or \"none\"}  Tracker: {tracker}  Agents: {working} working, {idle} idle' + (f'  Personas: {personas}' if personas else ''))
 except:
     print('(waiting for status...)')
 " 2>/dev/null || echo "(daemon unreachable)")

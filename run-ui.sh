@@ -14,9 +14,12 @@
 #   ./run-ui.sh --restart  # Stop a running daemon, then set up + start again
 #                          # (the plugin rebuild loop: build the plugin, then this)
 #   ./run-ui.sh --clean    # Stop a running daemon and exit
+#   ./run-ui.sh --legacy   # Same, on the pre-persona team layout (./setup-demo.sh
+#                          # --legacy): watch the daemon migrate it on start
 #
-# Once the daemon is healthy it prints each plugin package's load status and
-# its sources (GET /api/work-sources) — the demo-tracker plus anything in
+# Once the daemon is healthy it prints each plugin package's load status, its
+# sources and how many personas it ships (GET /api/work-sources) — the
+# demo-tracker, the mpt-personas-demo persona package, plus anything in
 # plugins.local.json (see ./try-plugin.sh).
 #
 
@@ -54,8 +57,10 @@ cleanup() {
   fi
 }
 
+SETUP_ARGS=()
 case "${1:-}" in
   --clean) cleanup; exit 0 ;;
+  --legacy) SETUP_ARGS=(--legacy) ;;
   --restart)
     cleanup
     # Wait (up to 10s) for the port to be released before starting again.
@@ -66,7 +71,7 @@ case "${1:-}" in
     ;;
   "") ;;
   -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) err "Unknown option $1 (try --restart or --clean)"; exit 1 ;;
+  *) err "Unknown option $1 (try --restart, --clean or --legacy)"; exit 1 ;;
 esac
 
 # ─── Preflight ────────────────────────────────────────────────────────
@@ -96,7 +101,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 log "Setting up demo fixtures..."
-"$SCRIPT_DIR/setup-demo.sh" > /dev/null
+"$SCRIPT_DIR/setup-demo.sh" ${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"} > /dev/null
 ok "Demo fixtures in place ($TEAM_DIR)"
 
 # ─── Start Daemon ─────────────────────────────────────────────────────
@@ -137,7 +142,10 @@ let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
   const label = new Map(sources.map((x) => [x.id, x.label]));
   if (!plugins.length) console.log("  (no plugin packages configured)");
   for (const p of plugins) {
-    const srcs = p.sources.map((id) => label.get(id) && label.get(id) !== id ? `${id} ("${label.get(id)}")` : id).join(", ") || "no sources";
+    const names = p.sources.map((id) => label.get(id) && label.get(id) !== id ? `${id} ("${label.get(id)}")` : id);
+    const personas = (p.personas || []).length;
+    if (personas) names.push(`${personas} persona${personas === 1 ? "" : "s"}`);
+    const srcs = names.join(", ") || "no sources";
     if (p.state === "loaded") console.log(`  \x1b[0;32m✓\x1b[0m ${p.spec} — ${srcs}`);
     else console.log(`  \x1b[0;31m✗\x1b[0m ${p.spec} — ${p.error}${p.sources.length ? ` (still registered: ${srcs})` : ""}`);
   }
@@ -152,8 +160,8 @@ echo "  Schedule:  ${DAEMON_URL}/schedule"
 echo ""
 echo "  Seeded: 'Add User Authentication' (3 tasks), a pending 'Polish the UI"
 echo "  Theme' story, plus Solitary + Scheduled standalone WorkDefs, and the"
-echo "  demo-tracker plugin's 2 issues (Work → Demo Tracker; edit"
-echo "  $DEMO_DIR/tracker/tracker.json to re-sync)."
+echo "  demo-tracker plugin's 3 issues (Work → Demo Tracker; edit"
+echo "  $DEMO_DIR/tracker/tracker.json to re-sync). Personas: Config → Personas."
 echo ""
 echo "  Ctrl+C to stop. After rebuilding a plugin: ./run-ui.sh --restart"
 echo ""

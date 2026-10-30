@@ -33,6 +33,15 @@
 // `ctx.options()` — so every setting but `intervalSeconds`, `id` and `label`
 // applies without a daemon restart. No `toggle` is declared: MPT gives every
 // external source an on/off switch (`features.demo-tracker`) for free.
+//
+// Personas: the package also ships a persona (`personas/tracker-worker.md`,
+// listed under package.json `"mpt": { "personas" }`), and the source names it
+// as its `defaultPersona` — how MPT works this source's items unless the team
+// picks another on Config → Sources, or a person overrides one item on its page
+// (my-pizza-team docs/DESIGN.md "Work Source personas"). It declares no
+// `triagePersona`, so a triage-mode issue (DEMO-3) needs the team to pick one:
+// without it, the issue is mirrored but not run, and Config → Sources says why.
+// The demo team's config.json sets `sourcePersonas.demo-tracker.triagePersona`.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -131,6 +140,9 @@ export default function demoTracker(options, { teamDir }) {
     get mode() {
       return settings.mode;
     },
+    // How MPT works this source's (work-mode) items unless the team or a person
+    // picks another: this package's own persona, `<package.json name>/<file name>`.
+    defaultPersona: "mpt-source-demo-tracker/tracker-worker",
 
     // The settings form (Config → Sources). A small JSON Schema with UI hints;
     // MPT also validates Preview / Save against it. `id` / `label` are left out

@@ -1,7 +1,7 @@
 ---
 title: Audit project dependencies
 directory: __DEMO_PROJECT__
-contextRefs: [project-conventions]
+persona: mpt-personas-demo/careful-reviewer
 ---
 ## Goal
 

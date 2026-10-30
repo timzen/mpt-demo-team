@@ -1,0 +1,26 @@
+{
+  "port": 6789,
+  "defaultWorkflow": "default",
+  "tmuxSession": "mpt-demo-legacy",
+  "maxTeammates": 1,
+  "autosave": {
+    "flushIntervalMinutes": 30,
+    "commitIntervalHours": 24,
+    "commitMessage": "mpt-demo: checkpoint {timestamp}",
+    "autoCommit": false
+  },
+  "teammates": {
+    "nouns": ["ripley"]
+  },
+  "packages": [
+    {
+      "source": "../../../plugins/mpt-source-demo-tracker",
+      "config": {
+        "file": "../../tracker/tracker.json",
+        "directory": "__DEMO_PROJECT__",
+        "intervalSeconds": 10,
+        "mode": "triage"
+      }
+    }
+  ]
+}

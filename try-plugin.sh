@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# try-plugin.sh — Try a Work Source plugin in the demo team's sandbox.
+# try-plugin.sh — Try a plugin package (Work Sources and/or personas) in the
+# demo team's sandbox.
 #
 # A git/npm spec (ssh://…, https://…, git:…, npm:…) is installed into the demo
 # team first (`mpt plugins add`: clone + npm install + npm run build, into
@@ -27,7 +28,11 @@ Usage:
   ./try-plugin.sh --remove <path|spec>
   ./try-plugin.sh --list
 
-Try a plugin package in the demo team (README.md "Trying your own plugins"):
+Try a plugin package in the demo team (README.md "Trying your own plugins") —
+Work Sources, personas ("mpt": { "personas": [...] }), or both. A persona-only
+package needs no build; its personas show on Config → Personas, read-only, as
+<package.json name>/<file name> (e.g. ./plugins/mpt-personas-demo, which the
+demo fixture already loads).
 
   0. git/npm specs only: ./setup-demo.sh, then install it into the demo team —
      mpt plugins add <spec> [--config '<json>'] (clone + npm install + npm run

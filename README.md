@@ -9,15 +9,17 @@ mpt-demo-team/
 ├── setup-demo.sh           # Run this to set up the demo
 ├── fixtures/
 │   ├── project/            # Demo todo API (TypeScript, Node.js)
+│   │   ├── AGENTS.md       # The project's conventions (build/test, style, API) — teammates read it
 │   │   ├── src/index.ts    # Simple HTTP todo API — no auth yet
 │   │   ├── tests/          # Basic tests
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   ├── team/               # MPT team directory fixture (flat; see my-pizza-team docs/WORKDEF_UNIFICATION.md)
-│   │   ├── config.json            # `packages` loads the demo-tracker plugin
+│   │   ├── config.json            # `packages`: demo-tracker + mpt-personas-demo; `sourcePersonas`
+│   │   ├── personas/
+│   │   │   └── demo-coder.md       # team persona the in_progress state selects
 │   │   ├── workflows/default/
-│   │   │   ├── workflow.json
-│   │   │   └── in_progress.md      # state persona for the one agent state
+│   │   │   └── workflow.json       # in_progress: { "persona": "demo-coder" }
 │   │   ├── stories/               # flat story files (children live in tasks/)
 │   │   │   ├── add-user-auth.json      # tasks: [{id,status}]; directory = demo project
 │   │   │   └── ui-theme-polish.json    # pending (design-review gate)
@@ -26,19 +28,19 @@ mpt-demo-team/
 │   │   │   ├── add-user-auth-2/workdef.md
 │   │   │   ├── add-user-auth-3/workdef.md
 │   │   │   ├── ui-theme-polish-1/workdef.md
-│   │   │   ├── audit-project-dependencies/workdef.md  # Solitary (no parent)
-│   │   │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule)
-│   │   ├── schedules/             # cron parents (fire their child WorkDefs)
-│   │   │   └── nightly-test-run.json                  # cron 0 2 * * *
-│   │   └── context/
-│   │       └── project-conventions.md
+│   │   │   ├── audit-project-dependencies/workdef.md  # Solitary (no parent); persona careful-reviewer
+│   │   │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule); no persona
+│   │   └── schedules/             # cron parents (fire their child WorkDefs)
+│   │       └── nightly-test-run.json                  # cron 0 2 * * *
+│   ├── team-legacy/        # Pre-persona team (context/, triage.md, in_progress.md): ./setup-demo.sh --legacy
 │   └── tracker/
 │       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2; DEMO-3 triage-mode)
 ├── plugins/
-│   └── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build)
+│   ├── mpt-source-demo-tracker/   # Example Work Source plugin (plain JS, no build) + its own persona
+│   └── mpt-personas-demo/         # Example persona package (personas only: 3 personas, no build)
 ├── plugins.local.example.json     # Example overlay for your own plugins (see "Trying your own plugins")
 ├── try-plugin.sh           # Install (git/npm) + doctor a plugin, add it to plugins.local.json, bring the sandbox up
-├── run-ui.sh               # Daemon only (no agents); --restart, --clean
+├── run-ui.sh               # Daemon only (no agents); --restart, --clean, --legacy
 ├── run-e2e.sh              # Full end-to-end run (daemon + leader + worker)
 ├── .gitignore              # Ignores demo/, plugins.local.json and .plugin-packages/
 └── README.md
@@ -77,7 +79,56 @@ TEAM_DIR=./demo/team/.my-pizza-team mpt start
 2. **Add register/login endpoints** — `POST /register` and `POST /login`
 3. **Protect todo routes** — Auth middleware on all `/todos` endpoints
 
-The tasks are designed to be small, self-contained, and testable. They exercise the full MPT workflow: `todo → in_progress → review → done`.
+The tasks are designed to be small, self-contained, and testable. They exercise the full MPT workflow: `todo → in_progress → review → done`. The `in_progress` state selects the team persona **Demo coder** (`personas/demo-coder.md`), so every board task's prompt starts with it.
+
+## Personas
+
+How a teammate works is a **persona** (my-pizza-team GUIDE.md "Personas";
+docs/DESIGN.md "Personas: One Library, Selected by Reference"): a markdown file
+that workflow states, triage, the assistant, Solitary/Scheduled tasks and Work
+Sources *select by id*. Project knowledge isn't a persona — it lives in the
+project, in `demo/project/AGENTS.md` (formerly the team's
+`context/project-conventions.md`; MPT no longer has a context library). The
+fixtures use every origin and most ways of selecting one:
+
+| Persona | Origin | Selected by |
+|---------|--------|-------------|
+| `demo-coder` | team (`fixtures/team/personas/demo-coder.md`) | the `default` workflow's `in_progress` state (`workflow.json` `"persona"`) |
+| `mpt-personas-demo/careful-reviewer` | package (`plugins/mpt-personas-demo`) | the Solitary task *Audit project dependencies* (`persona:` in its workdef.md) |
+| `mpt-personas-demo/tracker-triager` | package | the demo-tracker's per-source triage persona (config.json `sourcePersonas.demo-tracker.triagePersona`) — DEMO-3 |
+| `mpt-source-demo-tracker/tracker-worker` | package (the tracker plugin itself) | the tracker's declared `defaultPersona` — DEMO-1, DEMO-2 |
+| `mpt-personas-demo/careful-implementer` | package | nothing by default; `run-e2e.sh` makes it DEMO-1's per-item override (the Persona picker on its page) |
+| `builtin:triage` / `builtin:assistant` / `builtin:worker` | built-in | note triage and the assistant (nothing set); `builtin:worker` only stands in for a missing persona |
+
+The Scheduled *Nightly test run* sets no persona, so its prompt has no persona block.
+
+**The persona package.** `plugins/mpt-personas-demo/` is a persona-only plugin
+package: `package.json` `"mpt": { "personas": ["personas/*.md"] }`, three
+personas, no sources, no build. config.json loads it in place by relative path,
+like the tracker. Its personas are **read-only** on Config → Personas, named
+`<package.json name>/<file name>`; **Duplicate to edit** copies one into the team
+library. `mpt plugins doctor ./plugins/mpt-personas-demo` checks it (✓ per
+persona). Copy the folder to start your own team's package.
+
+**Watching it.** Config → **Personas** lists the library (team, built-in and
+package badges) and each persona's **Used by**. While a teammate works, a ✦
+persona chip on its Team row, Queue row, Watch header and the task's Runs shows
+the persona its run recorded at claim (`GET /api/agents` → `persona`, and
+`persona` on every WorkItem).
+
+**The legacy layout (migration).** `fixtures/team-legacy/` is a team in the
+pre-persona layout: `workflows/default/in_progress.md`, `triage.md`, and a
+`context/` library with a persona-tagged entry (`pair-programmer`), an entry
+attached to a story and to a Solitary task (`project-conventions`), and an
+unattached one (`release-checklist`); its demo-tracker runs in source-wide triage
+mode with no triage persona. `./setup-demo.sh --legacy` (or `./run-ui.sh
+--legacy`) sets it up, and on its first start the daemon migrates it in place:
+personas `default-in-progress`, `triage` and `pair-programmer` (the state and
+`triage.persona` point at them); the attached entry inlined into the tasks'
+Additional Context; `context/` archived as `context.migrated/` (with a notice on
+the home page); and `sourcePersonas.demo-tracker.triagePersona` seeded with
+`triage`. A second start changes nothing. `run-e2e.sh` checks all of it first.
+(The SQLite `assistant_persona` step can't be shown from fixtures: no `state.db`.)
 
 ## Showcasing Pause, Directory Affinity & Standalone Work
 
@@ -140,6 +191,17 @@ To answer a question, edit the issue's `body` and bump its `updatedAt` — the n
 revision is triaged again. (`"mode"` on an issue, or the plugin's `mode` option
 for all of them; see the plugin's README.)
 
+**Personas.** The plugin ships a persona of its own (`personas/tracker-worker.md`,
+listed in its `package.json` beside its source) and declares it as the source's
+`defaultPersona`, so DEMO-1 and DEMO-2 are worked with it. The demo team sets a
+**per-source** triage persona (`sourcePersonas.demo-tracker.triagePersona` in
+config.json; Config → Sources → Demo Tracker) for DEMO-3 — a triage-mode item
+*must* have one: without it the issue is mirrored but not run, and Config →
+Sources names the fix. A person can also override one item (the Persona picker on
+its page; `PUT /api/work-defs/demo-tracker~DEMO-1/persona`), which survives
+re-syncs. Resolution: the item's override → the source's per-item suggestion →
+the per-source setting → the source's default.
+
 How to watch it:
 
 - **UI:** Work → **Demo Tracker** tab (`/work/source/demo-tracker`): each issue,
@@ -158,8 +220,8 @@ Save on Config → Sources, which re-inits the plugin live).
 
 ## Trying your own plugins
 
-The demo team doubles as a **plugin sandbox**: try any Work Source plugin package
-— a git URL (`ssh://git.amazon.com/pkg/MPTSimWorkSources`), an `npm:` spec, or a
+The demo team doubles as a **plugin sandbox**: try any plugin package — Work
+Sources, personas (`"mpt": { "personas": [...] }`), or both — a git URL (`ssh://git.amazon.com/pkg/MPTSimWorkSources`), an `npm:` spec, or a
 local checkout you're writing — against a throwaway team before it goes into a
 real one, without committing your personal config, and without losing it (or
 re-cloning it) when the demo resets.
@@ -190,7 +252,12 @@ starts `run-ui.sh --restart` (unless `--no-start`). `git:<host>/<path>`,
   the next `try-plugin.sh`).
 - **The contract** (MPT isn't build-system aware): a git plugin must install and
   build with plain npm against your configured registry (`npm config get
-  registry`), or ship prebuilt `mpt.sources` entries.
+  registry`), or ship prebuilt `mpt.sources` entries. A persona-only package needs
+  no build at all (MPT never runs npm in one).
+- **Personas from a package** show on Config → Personas once the daemon restarts;
+  pick them on a workflow state, a task, or a source (Config → Sources: persona /
+  triage persona). A triage-mode source that declares no triage persona gets
+  `builtin:triage` on its first start — pick a better one there.
 - **Prerequisites:** git access to the host (for `ssh://git.amazon.com/…`, your
   ssh key set up for git.amazon.com — `git ls-remote <url>` should work). For
   live syncs of the SIM plugins (MPTSimWorkSources with `--config`, and the
@@ -303,10 +370,12 @@ source in the foreground — no leader, no worker:
 ./run-ui.sh            # set up fixtures + start the daemon (Ctrl+C to stop)
 ./run-ui.sh --restart  # stop the running daemon, re-run setup, start again
 ./run-ui.sh --clean    # stop a daemon started by this script
+./run-ui.sh --legacy   # the same on the pre-persona layout (watch it migrate)
 ```
 
-Once the daemon is healthy it prints each plugin package's load status and its
-sources (from `GET /api/work-sources`): ✓, or ✗ with the error.
+Once the daemon is healthy it prints each plugin package's load status, its
+sources and how many personas it ships (from `GET /api/work-sources`): ✓, or ✗
+with the error.
 
 Then open <http://localhost:7437/> (Board · Tasks · Schedule). Override the port
 with `PORT=8080 ./run-ui.sh`.
@@ -322,14 +391,28 @@ To run the full end-to-end flow (daemon + leader + worker agent):
 ```
 
 This will:
-1. Set up demo fixtures (runs `setup-demo.sh`)
-2. Start the MPT daemon from `../my-pizza-team` source
+1. Check the **persona migration**: set up the legacy layout (`setup-demo.sh
+   --legacy`), start the daemon on it, and assert each step's result (state file,
+   `triage.md` and the persona-tagged entry → personas listed by `GET
+   /api/personas`; the triage-mode source's triage persona seeded; attached context
+   inlined, `context/` → `context.migrated/`, the notice on `/api/status`,
+   `/api/context` → 410); restart it and assert nothing changed
+2. Set up the demo fixtures (`setup-demo.sh`) and start the MPT daemon from
+   `../my-pizza-team` source
 3. Check the demo-tracker plugin: loaded, all three issues mirrored and enqueued, and
-   write-back (a thread comment, a canceled run) lands in `demo/tracker/tracker.json`;
-   then play a teammate on the triage-mode **DEMO-3** through the agent API (triage
-   prompt, a `propose_work`-style analysis, COMPLETE), accept its proposal (a task is
+   write-back (a thread comment, a canceled run) lands in `demo/tracker/tracker.json`
+4. Check **personas**: `GET /api/personas` lists the team, built-in and package
+   personas; package personas are read-only (PUT/DELETE 409; duplicate works);
+   Used by (the workflow state, the Solitary task, the tracker's triage setting);
+   then claim DEMO-1 (after setting its per-item override) and DEMO-2 as a
+   throwaway agent and assert each prompt carries its persona and each WorkItem
+   recorded it (`via` workdef / source-default); complete both and reopen them in
+   the tracker file (the override survives the re-sync)
+5. Play a teammate on the triage-mode **DEMO-3** through the agent API (triage
+   prompt with the per-source triage persona, recorded on the run; a
+   `propose_work`-style analysis, COMPLETE), accept its proposal (a task is
    created, not run; the issue stays open), and re-queue it with Triage now
-4. Exercise the Config → Sources routes on the demo-tracker: `GET /api/sources` lists
+6. Exercise the Config → Sources routes on the demo-tracker: `GET /api/sources` lists
    it with its `configSchema` and toggle; a **preview** with draft settings (pointing
    at a scratch copy of the tracker with an extra issue, E2E-1) shows E2E-1 without
    mirroring anything, and invalid settings get a 400; a **Save** (`PUT
@@ -338,9 +421,11 @@ This will:
    mirrors, a **disconnect** switches it off and archives them, and no sync runs while
    it's off; finally the fixture settings are restored, it's switched back on, and
    DEMO-1..3 come back and are re-queued
-5. Launch a Pi leader in a tmux session
-6. Spawn a worker agent pointed at `demo/project/`
-7. Monitor task progress (and the tracker issues' statuses) until you Ctrl+C
+7. Launch a Pi leader in a tmux session
+8. Spawn a worker agent pointed at `demo/project/`, and wait (up to 2 minutes; a
+   warning, not a failure) for its **in-flight persona** on `GET /api/agents`
+9. Monitor task progress, the tracker issues' statuses and each working
+   teammate's persona until you Ctrl+C
 
 Prerequisites: `pi`, `node` 24+, `tmux`, and the Pi extension installed (`mpt setup`).
 

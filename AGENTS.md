@@ -7,8 +7,10 @@ Instructions for AI coding agents working on the mpt-demo-team project.
 This project provides a **reproducible demo environment** for testing my-pizza-team (MPT). It contains:
 
 - A fixture-based demo project (simple todo API)
-- A fixture-based team directory (story, tasks, workflow)
+- A fixture-based team directory (story, tasks, workflow, personas)
+- A legacy (pre-persona) team fixture that proves MPT's persona migration
 - An example Work Source plugin (`plugins/mpt-source-demo-tracker/`) and its seed tracker file
+- An example persona package (`plugins/mpt-personas-demo/`)
 - A setup script that copies fixtures into .gitignored runtime directories
 
 ## Before Starting Work
@@ -23,32 +25,30 @@ This project provides a **reproducible demo environment** for testing my-pizza-t
 mpt-demo-team/
 ├── fixtures/
 │   ├── project/          # Demo app source (todo API in TypeScript)
+│   │   ├── AGENTS.md     # The project's conventions (was the team's context/project-conventions.md)
 │   │   ├── src/index.ts  # The app agents will modify
 │   │   ├── tests/        # Existing tests
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── team/             # MPT team directory contents
-│       ├── config.json
-│       ├── workflows/default/
-│       │   ├── workflow.json
-│       │   ├── in_progress.md
-│       │   └── review.md
-│       ├── stories/add-user-auth/
-│       │   ├── story.json          # taskOrder lists the tasks in order
-│       │   └── tasks/              # dirs are named by task id (identity, not order)
-│       │       ├── add-user-auth-1/task.json
-│       │       ├── add-user-auth-2/task.json
-│       │       └── add-user-auth-3/task.json
-│       └── context/
-│           └── project-conventions.md
+│   ├── team/             # MPT team directory contents (persona layout)
+│   │   ├── config.json           # packages (tracker + persona package), sourcePersonas
+│   │   ├── personas/demo-coder.md  # team persona; the in_progress state selects it
+│   │   ├── workflows/default/workflow.json  # in_progress: { "persona": "demo-coder" }
+│   │   ├── stories/              # add-user-auth.json, ui-theme-polish.json (pending)
+│   │   ├── tasks/<id>/workdef.md # board tasks, Solitary audit (persona:), Scheduled nightly run
+│   │   └── schedules/nightly-test-run.json
+│   ├── team-legacy/      # Pre-persona team (context/, triage.md, workflows/default/in_progress.md,
+│   │                     #   story `context`, `contextRefs`, a triage-mode tracker) — setup-demo.sh --legacy
 │   └── tracker/tracker.json  # Seed issues for the demo-tracker plugin (DEMO-3 is triage-mode)
 ├── plugins/
-│   └── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, README)
+│   ├── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, personas/, README)
+│   └── mpt-personas-demo/        # Example persona package (package.json, personas/*.md, README)
 ├── plugins.local.example.json    # Example plugin overlay (plugins.local.json is gitignored)
 ├── setup-demo.sh         # Run to (re)create demo/ from fixtures (+ merges plugins.local.json;
-│                         #   keeps installed plugin packages; --fresh clears them)
+│                         #   keeps installed plugin packages; --fresh clears them;
+│                         #   --legacy uses fixtures/team-legacy)
 ├── try-plugin.sh         # [git/npm: mpt plugins add] → mpt plugins doctor → plugins.local.json → setup → run-ui.sh
-├── run-ui.sh             # Daemon only, no agents (--restart, --clean); prints plugin statuses
+├── run-ui.sh             # Daemon only, no agents (--restart, --clean, --legacy); prints plugin statuses
 ├── run-e2e.sh            # Full e2e run (ignores plugins.local.json)
 ├── .gitignore            # Ignores demo/, plugins.local.json and .plugin-packages/
 └── README.md
@@ -74,6 +74,25 @@ The demo uses MPT's default workflow: `todo → in_progress → review → done`
 
 Tasks are sequential within the story — MPT only offers the next unclaimed, non-done task.
 
+### Personas
+
+MPT's only behaviour concept (my-pizza-team docs/DESIGN.md "Personas: One
+Library, Selected by Reference"); there is no context library any more —
+project knowledge goes in the project (`fixtures/project/AGENTS.md`).
+
+- Team persona `demo-coder` (`fixtures/team/personas/`) ← the `in_progress` state.
+- `plugins/mpt-personas-demo/` (persona-only package, loaded in place by
+  config.json `packages`): `careful-implementer`, `careful-reviewer` (← the
+  Solitary audit task's `persona:`), `tracker-triager` (← config.json
+  `sourcePersonas.demo-tracker.triagePersona`). Ids are `<package.json name>/<file>`;
+  package personas are read-only (duplicate to edit).
+- The tracker ships `tracker-worker` and declares it as `defaultPersona`.
+- Keep personas polished and self-contained (frontmatter title/description/tags/kinds;
+  `###` headings or lower; no unclosed fences) — they're teaching examples too.
+- `fixtures/team-legacy/` must stay in the **old** layout (that's its point):
+  don't "fix" it. `run-e2e.sh` asserts exactly what the migration makes of it, so
+  change both together.
+
 ### The Demo-Tracker Plugin
 
 `plugins/mpt-source-demo-tracker/` is a fake, offline issue tracker written as a
@@ -90,12 +109,21 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
   reported as `ExternalDef.mode` / `WorkSource.mode`; MPT triages it (proposals
   accepted/rejected on its Triage tab) instead of working it, and `onItemTerminal`
   never closes a triage-mode issue. Seed issue **DEMO-3** is the example.
+- **Personas:** default `mpt-source-demo-tracker/tracker-worker` (its own package);
+  the fixture's per-source triage persona `mpt-personas-demo/tracker-triager` (a
+  triage-mode item needs one, or it's mirrored but not run); a per-item override is
+  `PUT /api/work-defs/demo-tracker~<id>/persona` (kept in the source's kv, survives re-syncs)
 - Watch it: Work → **Demo Tracker** tab, `mpt plugins list` (from `demo/team`),
   `GET /api/work-sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
 - **Settings UI:** it declares a `configSchema` + `preview`, and `init` re-reads
   `ctx.options()` (idempotent) — so Config → Sources edits, previews and saves it live
-- `run-e2e.sh` checks it loaded, mirrored + enqueued all three issues, that write-back reaches
-  the file, DEMO-3's triage end to end through the API (claim → triage prompt →
+- `run-e2e.sh` first checks the persona migration on `fixtures/team-legacy` (files, `GET
+  /api/personas`, the notice, 410 on `/api/context`, idempotent on restart); then the persona
+  library (team/built-in/package listed, package personas read-only, Used by), DEMO-1 (per-item
+  override) and DEMO-2 (source default) prompts + recorded WorkItem persona (claimed by a throwaway
+  agent, completed, reopened in the tracker file), DEMO-3's per-source triage persona, and the
+  worker's in-flight persona on `GET /api/agents` (warn-only). It also checks the tracker loaded,
+  mirrored + enqueued all three issues, that write-back reaches the file, DEMO-3's triage end to end through the API (claim → triage prompt →
   `/proposals` → COMPLETE → accept creates a task that never runs → Triage now), and the
   Config → Sources routes (GET /api/sources schema; preview mirrors nothing; PUT config
   re-inits + next sync reflects it; switch-off 409 → disconnect archives; restore + re-queue)

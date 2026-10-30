@@ -5,6 +5,8 @@ offline issue tracker whose "server" is one JSON file. It's a teaching example �
 everything a real tracker plugin (Jira, Asana, …) does, in ~100 lines of plain
 JavaScript so it loads in place from a local path with no build step. See
 my-pizza-team `GUIDE.md` "Writing a Work Source plugin" for the full plugin model.
+It also ships a **persona** beside its source, and names it as the source's
+default (see "Personas" below).
 
 ## What it does
 
@@ -23,8 +25,8 @@ An issue with `"mode": "triage"` (or every issue, with the `mode: "triage"`
 option; an issue's own `mode` wins, so `"mode": "work"` opts one back out) is
 reported with `ExternalDef.mode` / `WorkSource.mode` set, and MPT **triages** it
 instead of working it (my-pizza-team GUIDE.md "Triage-mode sources"; docs/DESIGN.md
-"External sources" — "Triage mode"). A teammate reads the issue and the team's
-`triage.md` and posts proposals with `propose_work`; you **Accept / Edit / Reject**
+"External sources" — "Triage mode"). A teammate reads the issue, follows the
+source's **triage persona** (below), and posts proposals with `propose_work`; you **Accept / Edit / Reject**
 them on the issue's **Triage** tab in MPT. Accepting creates the task (or story,
 or schedule) without starting it. The plugin does nothing else for this: the
 daemon picks the run's title ("Triage: …"), prompt, and Run (**Triage now**).
@@ -32,6 +34,31 @@ daemon picks the run's title ("Triage: …"), prompt, and Run (**Triage now**).
 Each new revision is a fresh triage, so to answer a teammate's question, edit the
 issue's `body` and bump its `updatedAt`. Proposals and decisions stay in MPT —
 they aren't written back to the tracker.
+
+## Personas
+
+How MPT works this source's items is a persona (my-pizza-team docs/DESIGN.md
+"Work Source personas"):
+
+- **Default:** the package ships `personas/tracker-worker.md` (listed under
+  package.json `"mpt": { "personas": ["personas/*.md"] }`, so its id is
+  `mpt-source-demo-tracker/tracker-worker`) and the source declares it as its
+  `defaultPersona`. Work-mode issues get it unless the team or a person picks
+  another.
+- **Per source:** the team can pick another on Config → Sources → Demo Tracker
+  (stored as config.json `sourcePersonas.demo-tracker.persona` /
+  `triagePersona`, never in the plugin's own `config`).
+- **Per item:** a person can override one mirrored issue (the Persona picker on
+  its page; `PUT /api/work-defs/demo-tracker~<id>/persona`); it survives
+  re-syncs. Order: the item's override → the per-source setting → the default.
+- **Triage needs one.** The source declares no `triagePersona`, so a triage-mode
+  issue (DEMO-3) runs only once the team sets the per-source triage persona —
+  until then it's mirrored but not run, and Config → Sources says why. The demo
+  team's config.json sets `mpt-personas-demo/tracker-triager`
+  (`plugins/mpt-personas-demo`).
+
+The persona a run actually got is recorded on its WorkItem at claim and shown as
+a ✦ chip while a teammate works on it.
 
 ## The tracker file
 
@@ -102,8 +129,11 @@ or its config (`mpt plugins list` shows whether it loaded, and the error if not)
 
 ## Package layout
 
-- `package.json` — `"mpt": { "sources": ["./index.js"] }` is the manifest;
+- `package.json` — `"mpt": { "sources": ["./index.js"], "personas": ["personas/*.md"] }`
+  is the manifest;
   `"peerDependencies": { "my-pizza-team": "*" }` lets `index.js` import
   `WORK_SOURCE_API_VERSION` from `my-pizza-team/plugin`, which the daemon resolves
   to its own copy (nothing is installed here).
 - `index.js` — the default export is a factory `(options, { teamDir }) => WorkSource`.
+- `personas/tracker-worker.md` — the source's default persona (frontmatter `title`,
+  `description`, `tags`, `kinds`, then the instructions).

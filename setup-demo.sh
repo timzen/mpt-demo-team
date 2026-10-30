@@ -18,9 +18,21 @@
 # install-on-start) survive the reset: they're moved aside to ./.plugin-packages/
 # (gitignored) before demo/ is wiped and moved back after the fixtures are copied.
 #
+# The team fixture (fixtures/team/) uses MPT's persona layout: personas/ (the
+# "Demo coder" persona the workflow's in_progress state selects), the persona
+# package plugins/mpt-personas-demo, and per-source personas for the tracker.
+# Project knowledge lives in the project (fixtures/project/AGENTS.md).
+#
+# --legacy sets up fixtures/team-legacy/ instead: an old-layout team (a context
+# library with a persona-tagged entry and attached entries, a workflow state
+# .md file, triage.md, a triage-mode source with no triage persona) that the
+# daemon migrates to personas the first time it starts on it. run-e2e.sh uses
+# it to check the migration, then resets to the normal fixture.
+#
 # Usage:
-#   ./setup-demo.sh          # Reset demo/ (keeps installed plugin packages)
-#   ./setup-demo.sh --fresh  # Reset demo/ and clear the plugin package cache too
+#   ./setup-demo.sh           # Reset demo/ (keeps installed plugin packages)
+#   ./setup-demo.sh --fresh   # Reset demo/ and clear the plugin package cache too
+#   ./setup-demo.sh --legacy  # Reset demo/ with the pre-persona team layout (migration demo)
 #
 
 set -euo pipefail
@@ -31,12 +43,15 @@ PACKAGES_DIR="$SCRIPT_DIR/demo/team/.my-pizza-team/packages"
 PACKAGES_CACHE="$SCRIPT_DIR/.plugin-packages"
 
 FRESH=0
-case "${1:-}" in
-  "") ;;
-  --fresh) FRESH=1 ;;
-  -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) echo "✗ Unknown option $1 (try --fresh or --help)" >&2; exit 1 ;;
-esac
+TEAM_FIXTURE="team"
+for arg in "$@"; do
+  case "$arg" in
+    --fresh) FRESH=1 ;;
+    --legacy) TEAM_FIXTURE="team-legacy" ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "✗ Unknown option $arg (try --fresh, --legacy or --help)" >&2; exit 1 ;;
+  esac
+done
 
 echo "🍕 MPT Demo Setup"
 echo "=================="
@@ -63,8 +78,12 @@ echo "   ✓ demo/project/ created"
 
 # --- Copy team directory ---
 echo "📁 Setting up team directory..."
-cp -R "$FIXTURES_DIR/team" "$SCRIPT_DIR/demo/team/.my-pizza-team"
-echo "   ✓ demo/team/.my-pizza-team/ created"
+cp -R "$FIXTURES_DIR/$TEAM_FIXTURE" "$SCRIPT_DIR/demo/team/.my-pizza-team"
+if [ "$TEAM_FIXTURE" = "team-legacy" ]; then
+  echo "   ✓ demo/team/.my-pizza-team/ created from fixtures/team-legacy (pre-persona layout; migrated on first start)"
+else
+  echo "   ✓ demo/team/.my-pizza-team/ created"
+fi
 if [ -d "$PACKAGES_CACHE" ]; then
   rm -rf "$PACKAGES_DIR"
   mv "$PACKAGES_CACHE" "$PACKAGES_DIR"
@@ -163,20 +182,37 @@ echo "Then open http://localhost:7437 to see the board."
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "📋 Story: \"Add User Authentication\""
+if [ "$TEAM_FIXTURE" = "team-legacy" ]; then
+  echo "🕰  Legacy layout (fixtures/team-legacy) — what MPT migrates on first start:"
+  echo "   • workflows/default/in_progress.md   → persona default-in-progress (+ workflow.json \"persona\")"
+  echo "   • triage.md                          → persona triage (+ config triage.persona)"
+  echo "   • context/pair-programmer.md (tagged persona) → persona pair-programmer"
+  echo "   • context/project-conventions.md (attached)   → inlined into its tasks' Additional Context"
+  echo "   • context/ → context.migrated/ (release-checklist.md, unattached, stays there; a notice says so)"
+  echo "   • the triage-mode demo-tracker gets sourcePersonas.demo-tracker.triagePersona = triage"
+  echo ""
+  echo "Start the daemon (./run-ui.sh is the normal fixture — use mpt start or the command above),"
+  echo "then look at Config → Personas and $TEAM_DIR_PATH. ./setup-demo.sh resets to the normal fixture."
+  exit 0
+fi
+echo "📋 Story: \"Add User Authentication\" (worked with the \"Demo coder\" persona — personas/demo-coder.md)"
 echo "   Task 1: Create auth module (hashing + tokens)"
 echo "   Task 2: Add register/login endpoints"
 echo "   Task 3: Add auth middleware to protect routes"
 echo ""
 echo "Plus a pending story (\"Polish the UI Theme\") and two standalone WorkDefs:"
-echo "   • Solitary:  Audit project dependencies   (Tasks page → Run)"
-echo "   • Scheduled: Nightly test run @ 2am        (Schedule page → Run now)"
+echo "   • Solitary:  Audit project dependencies   (Tasks page → Run; persona mpt-personas-demo/careful-reviewer)"
+echo "   • Scheduled: Nightly test run @ 2am        (Schedule page → Run now; no persona)"
 echo ""
 echo "Plus the demo-tracker plugin (plugins/mpt-source-demo-tracker): its 3 open"
 echo "issues show up on the \"Demo Tracker\" tab of the Work page. DEMO-1 and DEMO-2"
-echo "are worked; DEMO-3 (\"mode\": \"triage\") is triaged — a teammate proposes work"
-echo "you Accept or Reject on its Triage tab. Edit"
-echo "$TRACKER_FILE to see it re-sync (every 10s)."
+echo "are worked (with the tracker's own default persona, tracker-worker); DEMO-3"
+echo "(\"mode\": \"triage\") is triaged with the per-source triage persona"
+echo "mpt-personas-demo/tracker-triager — a teammate proposes work you Accept or"
+echo "Reject on its Triage tab. Edit $TRACKER_FILE to see it re-sync (every 10s)."
 echo ""
-echo "The demo project is a simple todo API in demo/project/src/index.ts"
-echo "Agents will modify it as they work through the tasks."
+echo "Personas: Config → Personas lists the team's demo-coder, the built-ins, and the"
+echo "read-only package personas from plugins/mpt-personas-demo and the tracker."
+echo ""
+echo "The demo project is a simple todo API in demo/project/src/index.ts (conventions"
+echo "in demo/project/AGENTS.md). Agents will modify it as they work through the tasks."

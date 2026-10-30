@@ -6,7 +6,6 @@
   "dependsOn": [],
   "directory": "__DEMO_PROJECT__",
   "workflow": "default",
-  "context": ["project-conventions"],
   "tasks": [
     { "id": "add-user-auth-1", "status": "todo" },
     { "id": "add-user-auth-2", "status": "todo" },
