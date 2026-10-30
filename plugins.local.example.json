@@ -3,10 +3,10 @@
     "//": "Copy to plugins.local.json (gitignored) or use ./try-plugin.sh, then ./setup-demo.sh or ./run-ui.sh --restart. Same entries as config.json \"packages\": a spec string, or { \"source\", \"config\" }; relative local paths are relative to this repo. Entries with only a \"//\" key are comments. See README.md \"Trying your own plugins\"."
   },
   {
-    "//": "A persona package (\"mpt\": { \"personas\": [\"personas/*.md\"] }) is an entry like any other — a local folder, git URL or npm spec, no config, no build: e.g. \"~/src/my-team-personas\". Its personas appear on Config → Personas as <package name>/<id>; select one per source on Config → Sources (persona / triage persona). The fixture already loads ./plugins/mpt-personas-demo. A triage-mode source must have a triage persona: one that declares none (MPTSimWorkSources' triage source) gets builtin:triage on its first start — pick a better one on Config → Sources (e.g. mpt-personas-demo/tracker-triager)."
+    "//": "A persona package (\"mpt\": { \"personas\": [\"personas/*.md\"] }) is an entry like any other — a local folder, git URL or npm spec, no config, no build: e.g. \"~/src/my-team-personas\". Its personas appear on Config → Personas as <package name>/<id>; select one per source on Config → Sources (persona / triage persona). The fixture already loads ./plugins/mpt-personas-demo. A triage-mode source must have a triage persona: one that declares none gets builtin:triage on its first start — pick a better one on Config → Sources (e.g. mpt-personas-demo/tracker-triager)."
   },
   {
-    "//": "MPTSimWorkSources (Taskei + SIM-T): run brazil-build in the package first. Replace the placeholders, or leave config out and set it up on Config → Sources (Preview, then Save; copy a keeper back here).",
+    "//": "MPTSimWorkSources (Taskei + SIM-T): run brazil-build in the package first. It ships its own personas — sim-t triages with @amzn/mpt-sim-work-sources/sim-t-triager and taskei works with @amzn/mpt-sim-work-sources/taskei-implementer (override per source on Config → Sources); no triage.md needed. Replace the placeholders, or leave config out and set it up on Config → Sources (Preview, then Save; copy a keeper back here).",
     "source": "~/ws/MPT/src/MPTSimWorkSources",
     "config": {
       "taskei": { "workflowStep": "Implementation", "dryRun": false, "maxItems": 3 },
