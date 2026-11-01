@@ -293,7 +293,7 @@ ok "Pending: not enqueued, editable, locked once activated"
 
 log "Checking the demo-tracker plugin..."
 TRACKER_SOURCE="demo-tracker"
-PLUGIN_STATE=$(curl -sf "$DAEMON_URL/api/work-sources" | python3 -c "
+PLUGIN_STATE=$(curl -sf "$DAEMON_URL/api/sources" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 p = [p for p in d['plugins'] if '$TRACKER_SOURCE' in p['sources']]
@@ -303,7 +303,7 @@ ok "Plugin loaded (source '$TRACKER_SOURCE')"
 
 # Sync runs at startup; give it a moment to mirror and enqueue the three open issues.
 tracker_ready() {
-  curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(len([d for d in json.load(sys.stdin)['defs'] if d['latestState']=='READY']))"
+  curl -sf "$DAEMON_URL/api/sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(len([d for d in json.load(sys.stdin)['defs'] if d['latestState']=='READY']))"
 }
 for i in $(seq 1 30); do
   [ "$(tracker_ready)" -ge 3 ] && break
@@ -353,7 +353,7 @@ log "Checking the persona library and persona packages..."
 PERSONA_IDS=$(curl -sf "$DAEMON_URL/api/personas" | json_field "' '.join(sorted(p['id'] + ':' + p['origin']['kind'] + ':' + str(p['readOnly']) for p in d['personas']))")
 EXPECTED_PERSONAS="builtin:assistant:builtin:True builtin:triage:builtin:True builtin:worker:builtin:True demo-coder:team:False mpt-personas-demo/careful-implementer:package:True mpt-personas-demo/careful-reviewer:package:True mpt-personas-demo/tracker-triager:package:True mpt-source-demo-tracker/tracker-worker:package:True"
 [ "$PERSONA_IDS" = "$EXPECTED_PERSONAS" ] || { err "GET /api/personas: $PERSONA_IDS"; exit 1; }
-PERSONAS_PLUGIN=$(curl -sf "$DAEMON_URL/api/work-sources" | json_field "[(p['state'], len(p['sources']), len(p['personas'])) for p in d['plugins'] if p['spec'].endswith('mpt-personas-demo')]")
+PERSONAS_PLUGIN=$(curl -sf "$DAEMON_URL/api/sources" | json_field "[(p['state'], len(p['sources']), len(p['personas'])) for p in d['plugins'] if p['spec'].endswith('mpt-personas-demo')]")
 [ "$PERSONAS_PLUGIN" = "[('loaded', 0, 3)]" ] || { err "mpt-personas-demo didn't load as a persona-only package: $PERSONAS_PLUGIN"; exit 1; }
 
 REVIEWER="mpt-personas-demo%2Fcareful-reviewer"
@@ -415,7 +415,7 @@ for issue in data["issues"]:
         issue["status"], issue["updatedAt"] = "open", issue["updatedAt"].replace("2024-06-01", "2024-06-02")
 json.dump(data, open(sys.argv[1], "w"), indent=2)
 PY
-curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/sync"
 for i in $(seq 1 30); do
   [ -n "$(ready_item DEMO-1)" ] && [ -n "$(ready_item DEMO-2)" ] && break
   sleep 0.5
@@ -440,7 +440,7 @@ ok "Tracker personas: DEMO-1 per-item override, DEMO-2 source default — in eac
 log "Checking the triage-mode issue (DEMO-3)..."
 TRIAGE_DEF="$TRACKER_SOURCE~DEMO-3"
 TRIAGER="e2e-triager"
-DEMO3_MODE=$(curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print([d.get('mode') for d in json.load(sys.stdin)['defs'] if d['id']=='$TRIAGE_DEF'][0])")
+DEMO3_MODE=$(curl -sf "$DAEMON_URL/api/sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print([d.get('mode') for d in json.load(sys.stdin)['defs'] if d['id']=='$TRIAGE_DEF'][0])")
 [ "$DEMO3_MODE" = "triage" ] || { err "DEMO-3 isn't in triage mode ($DEMO3_MODE)"; exit 1; }
 DEMO3_ITEM=$(curl -sf "$DAEMON_URL/api/work-items?state=READY" | python3 -c "
 import sys, json
@@ -522,8 +522,8 @@ SAVED_OPTIONS=$(source_view "json.dumps(s['options'])")
 DRAFT_OPTIONS=$(echo "$SAVED_OPTIONS" | python3 -c "import sys,json; o=json.load(sys.stdin); o['file']='../../tracker/e2e-scratch.json'; print(json.dumps(o))")
 ok "GET /api/sources: demo-tracker is a plugin source with a configSchema and its own toggle"
 
-all_defs() { curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs?status=all" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId']+':'+d['status'] for d in json.load(sys.stdin)['defs'])))"; }
-active_defs() { curl -sf "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId'] for d in json.load(sys.stdin)['defs'])))"; }
+all_defs() { curl -sf "$DAEMON_URL/api/sources/$TRACKER_SOURCE/defs?status=all" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId']+':'+d['status'] for d in json.load(sys.stdin)['defs'])))"; }
+active_defs() { curl -sf "$DAEMON_URL/api/sources/$TRACKER_SOURCE/defs" | python3 -c "import sys,json; print(' '.join(sorted(d['externalId'] for d in json.load(sys.stdin)['defs'])))"; }
 # Wait (up to 10s) for the active mirrors to be exactly $1.
 wait_active_defs() {
   for i in $(seq 1 20); do
@@ -549,7 +549,7 @@ pkgs = json.load(open('$TEAM_DIR/.my-pizza-team/config.json'))['packages']
 sys.exit(0 if any(isinstance(p, dict) and p.get('config', {}).get('file') == '../../tracker/e2e-scratch.json' for p in pkgs) else 1)" \
   || { err "Save didn't write packages[].config.file to config.json"; exit 1; }
 # The re-init syncs at once; force one too (a 409 "in-flight" just means that one's running).
-curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/sync"
 wait_active_defs "DEMO-1 DEMO-2 DEMO-3 E2E-1" || { err "The sync after the Save doesn't reflect it: $(active_defs)"; exit 1; }
 ok "Save: config.json updated, plugin re-initialized without a restart, next sync mirrored E2E-1"
 
@@ -560,12 +560,12 @@ for k in ('featureUsage', 'featureSources', 'defaultNouns'): b.pop(k, None)
 b['features'] = {'$TRACKER_SOURCE': False}
 print(json.dumps(b))" | curl -s -o /dev/null -w "%{http_code}" -X PUT "$DAEMON_URL/api/config" -H "Content-Type: application/json" -d @-)
 [ "$FEATURES_OFF_CODE" = "409" ] || { err "Switching demo-tracker off with active mirrors wasn't refused ($FEATURES_OFF_CODE)"; exit 1; }
-DISCONNECT=$(curl -s -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/disconnect")
+DISCONNECT=$(curl -s -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/disconnect")
 [ "$(echo "$DISCONNECT" | json_field "d['success'], d['feature'], len(d['archived'])")" = "True $TRACKER_SOURCE 4" ] || { err "Disconnect failed: $DISCONNECT"; exit 1; }
 # Its defs route is gated now (403), so read the mirrors' workdef.md files.
 STILL_ACTIVE=$(grep -L "^status: archived" "$TEAM_DIR/.my-pizza-team/tasks/$TRACKER_SOURCE~"*/workdef.md || true)
 [ -z "$STILL_ACTIVE" ] || { err "Disconnect left active mirrors: $STILL_ACTIVE"; exit 1; }
-[ "$(http_code "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/defs")" = "403" ] || { err "demo-tracker's Work routes aren't gated while it's off"; exit 1; }
+[ "$(http_code "$DAEMON_URL/api/sources/$TRACKER_SOURCE/defs")" = "403" ] || { err "demo-tracker's Work routes aren't gated while it's off"; exit 1; }
 [ "$(source_view "s['toggle']['enabled']")" = "False" ] || { err "demo-tracker is still on after the disconnect"; exit 1; }
 # While off: a new issue isn't pulled, by a forced sync (refused) or the 10s timer.
 python3 - "$SCRATCH_TRACKER" <<'PY'
@@ -576,7 +576,7 @@ json.dump(data, open(sys.argv[1], "w"), indent=2)
 PY
 # (Its Work routes are gated while it's off, so look at /api/sources and the mirror files.)
 LAST_SYNC_AT=$(source_view "(s['sync']['last'] or {}).get('at')")
-OFF_SYNC=$(http_code -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync")
+OFF_SYNC=$(http_code -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/sync")
 [ "$OFF_SYNC" != "200" ] || { err "A switched-off demo-tracker still synced"; exit 1; }
 sleep 12
 [ "$(source_view "(s['sync']['last'] or {}).get('at')")" = "$LAST_SYNC_AT" ] || { err "demo-tracker synced while switched off"; exit 1; }
@@ -593,7 +593,7 @@ for k in ('featureUsage', 'featureSources', 'defaultNouns'): b.pop(k, None)
 b['features'] = {'$TRACKER_SOURCE': True}
 print(json.dumps(b))" | curl -s -o /dev/null -w "%{http_code}" -X PUT "$DAEMON_URL/api/config" -H "Content-Type: application/json" -d @-)
 [ "$ON_CODE" = "200" ] || { err "Switching demo-tracker back on failed ($ON_CODE)"; exit 1; }
-curl -s -o /dev/null -X POST "$DAEMON_URL/api/work-sources/$TRACKER_SOURCE/sync"
+curl -s -o /dev/null -X POST "$DAEMON_URL/api/sources/$TRACKER_SOURCE/sync"
 wait_active_defs "DEMO-1 DEMO-2 DEMO-3" || { err "Switching back on didn't restore DEMO-1..3 (active: $(active_defs))"; exit 1; }
 for issue in DEMO-1 DEMO-2 DEMO-3; do
   curl -sf -X POST "$DAEMON_URL/api/work-defs/$TRACKER_SOURCE~$issue/enqueue" >/dev/null || { err "Re-queuing $issue failed"; exit 1; }

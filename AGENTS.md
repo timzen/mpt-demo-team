@@ -114,7 +114,7 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
   triage-mode item needs one, or it's mirrored but not run); a per-item override is
   `PUT /api/work-defs/demo-tracker~<id>/persona` (kept in the source's kv, survives re-syncs)
 - Watch it: Work → **Demo Tracker** tab, `mpt plugins list` (from `demo/team`),
-  `GET /api/work-sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
+  `GET /api/sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
 - **Settings UI:** it declares a `configSchema` + `preview`, and `init` re-reads
   `ctx.options()` (idempotent) — so Config → Sources edits, previews and saves it live
 - `run-e2e.sh` first checks the persona migration on `fixtures/team-legacy` (files, `GET

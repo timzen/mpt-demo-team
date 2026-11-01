@@ -18,7 +18,7 @@
 #                          # --legacy): watch the daemon migrate it on start
 #
 # Once the daemon is healthy it prints each plugin package's load status, its
-# sources and how many personas it ships (GET /api/work-sources) — the
+# sources and how many personas it ships (GET /api/sources) — the
 # demo-tracker, the mpt-personas-demo persona package, plus anything in
 # plugins.local.json (see ./try-plugin.sh).
 #
@@ -134,9 +134,9 @@ fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Plugins (GET /api/work-sources)"
+echo "  Plugins (GET /api/sources)"
 echo ""
-curl -sf "$DAEMON_URL/api/work-sources" | node -e '
+curl -sf "$DAEMON_URL/api/sources" | node -e '
 let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
   const { plugins = [], sources = [] } = JSON.parse(s);
   const label = new Map(sources.map((x) => [x.id, x.label]));
@@ -149,7 +149,7 @@ let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
     if (p.state === "loaded") console.log(`  \x1b[0;32m✓\x1b[0m ${p.spec} — ${srcs}`);
     else console.log(`  \x1b[0;31m✗\x1b[0m ${p.spec} — ${p.error}${p.sources.length ? ` (still registered: ${srcs})` : ""}`);
   }
-});' || warn "Couldn't read $DAEMON_URL/api/work-sources"
+});' || warn "Couldn't read $DAEMON_URL/api/sources"
 
 echo ""
 ok "Daemon running (PID $DAEMON_PID) — open ${DAEMON_URL}/ in your browser"

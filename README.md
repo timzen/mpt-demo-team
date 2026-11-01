@@ -207,7 +207,7 @@ How to watch it:
 - **UI:** Work → **Demo Tracker** tab (`/work/source/demo-tracker`): each issue,
   its fake link, revision, and latest run. **Sync now** pulls immediately.
 - **CLI:** from `demo/team`, `mpt plugins list` shows whether it's installed and
-  loaded (and the error if not). `curl localhost:<port>/api/work-sources` shows the same.
+  loaded (and the error if not). `curl localhost:<port>/api/sources` shows the same.
 - **Re-sync:** edit `demo/tracker/tracker.json` — add an issue, or bump an
   issue's `updatedAt` to run it again; set its `status` to anything but `open`
   and its mirror is archived. Changes show up within ~10s.
@@ -374,7 +374,7 @@ source in the foreground — no leader, no worker:
 ```
 
 Once the daemon is healthy it prints each plugin package's load status, its
-sources and how many personas it ships (from `GET /api/work-sources`): ✓, or ✗
+sources and how many personas it ships (from `GET /api/sources`): ✓, or ✗
 with the error.
 
 Then open <http://localhost:7437/> (Board · Tasks · Schedule). Override the port
