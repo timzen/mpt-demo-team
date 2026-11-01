@@ -8,7 +8,7 @@ This project provides a **reproducible demo environment** for testing my-pizza-t
 
 - A fixture-based demo project (simple todo API)
 - A fixture-based team directory (story, tasks, workflow, personas)
-- A legacy (pre-persona) team fixture that proves MPT's persona migration
+- A pre-0.36.0 team fixture that proves MPT refuses to start on an old layout
 - An example Work Source plugin (`plugins/mpt-source-demo-tracker/`) and its seed tracker file
 - An example persona package (`plugins/mpt-personas-demo/`)
 - A setup script that copies fixtures into .gitignored runtime directories
@@ -37,8 +37,8 @@ mpt-demo-team/
 │   │   ├── stories/              # add-user-auth.json, ui-theme-polish.json (pending)
 │   │   ├── tasks/<id>/workdef.md # board tasks, Solitary audit (persona:), Scheduled nightly run
 │   │   └── schedules/nightly-test-run.json
-│   ├── team-legacy/      # Pre-persona team (context/, triage.md, workflows/default/in_progress.md,
-│   │                     #   story `context`, `contextRefs`, a triage-mode tracker) — setup-demo.sh --legacy
+│   ├── team-legacy/      # A pre-0.36.0 layout (story `paused`, backlog/<id>.json, `draft: true`,
+│   │                     #   triage.md; a nested archived/<id>/story.json that must NOT count) — --legacy
 │   └── tracker/tracker.json  # Seed issues for the demo-tracker plugin (DEMO-3 is triage-mode)
 ├── plugins/
 │   ├── mpt-source-demo-tracker/  # Example Work Source plugin (package.json, index.js, personas/, README)
@@ -89,9 +89,9 @@ project knowledge goes in the project (`fixtures/project/AGENTS.md`).
 - The tracker ships `tracker-worker` and declares it as `defaultPersona`.
 - Keep personas polished and self-contained (frontmatter title/description/tags/kinds;
   `###` headings or lower; no unclosed fences) — they're teaching examples too.
-- `fixtures/team-legacy/` must stay in the **old** layout (that's its point):
-  don't "fix" it. `run-e2e.sh` asserts exactly what the migration makes of it, so
-  change both together.
+- `fixtures/team-legacy/` must stay in the **old** (pre-0.36.0) layout — that's its
+  point: don't "fix" it. `run-e2e.sh` asserts the daemon's refusal names each of its
+  findings (and not the nested `archived/old-story/` leftover), so change both together.
 
 ### The Demo-Tracker Plugin
 
@@ -117,8 +117,8 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
   `GET /api/sources`; edit `demo/tracker/tracker.json` to trigger a re-sync (~10s)
 - **Settings UI:** it declares a `configSchema` + `preview`, and `init` re-reads
   `ctx.options()` (idempotent) — so Config → Sources edits, previews and saves it live
-- `run-e2e.sh` first checks the persona migration on `fixtures/team-legacy` (files, `GET
-  /api/personas`, the notice, 404 on `/api/context`, idempotent on restart); then the persona
+- `run-e2e.sh` first checks the daemon refuses `fixtures/team-legacy` (non-zero exit, the
+  "install 0.36.x first" message naming each finding, no file changed); then the persona
   library (team/built-in/package listed, package personas read-only, Used by), DEMO-1 (per-item
   override) and DEMO-2 (source default) prompts + recorded WorkItem persona (claimed by a throwaway
   agent, completed, reopened in the tracker file), DEMO-3's per-source triage persona, and the

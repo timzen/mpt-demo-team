@@ -14,8 +14,10 @@
 #   ./run-ui.sh --restart  # Stop a running daemon, then set up + start again
 #                          # (the plugin rebuild loop: build the plugin, then this)
 #   ./run-ui.sh --clean    # Stop a running daemon and exit
-#   ./run-ui.sh --legacy   # Same, on the pre-persona team layout (./setup-demo.sh
-#                          # --legacy): watch the daemon migrate it on start
+#   ./run-ui.sh --legacy   # Set up the pre-0.36.0 team layout (./setup-demo.sh
+#                          # --legacy) and watch the daemon refuse to start on it
+#                          # with the "install 0.36.x first" message; exits 0 when
+#                          # it does, leaving no daemon running
 #
 # Once the daemon is healthy it prints each plugin package's load status, its
 # sources and how many personas it ships (GET /api/sources) — the
@@ -58,9 +60,10 @@ cleanup() {
 }
 
 SETUP_ARGS=()
+LEGACY=0
 case "${1:-}" in
   --clean) cleanup; exit 0 ;;
-  --legacy) SETUP_ARGS=(--legacy) ;;
+  --legacy) SETUP_ARGS=(--legacy); LEGACY=1 ;;
   --restart)
     cleanup
     # Wait (up to 10s) for the port to be released before starting again.
@@ -103,6 +106,43 @@ echo ""
 log "Setting up demo fixtures..."
 "$SCRIPT_DIR/setup-demo.sh" ${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"} > /dev/null
 ok "Demo fixtures in place ($TEAM_DIR)"
+
+# ─── The pre-0.36.0 layout: the daemon must refuse it ────────────────
+
+if [ "$LEGACY" = 1 ]; then
+  log "Starting the daemon on the pre-0.36.0 layout (it should refuse)..."
+  echo ""
+  # A refusal exits at once; a daemon that starts anyway is stopped after 20s
+  # and reported. (No `timeout`: macOS doesn't ship one.)
+  OUT_FILE="$(mktemp)"
+  (cd "$MPT_SOURCE" && exec env TEAM_DIR="$TEAM_DIR" PORT="$DAEMON_PORT" node daemon/main.ts) >"$OUT_FILE" 2>&1 &
+  LEGACY_PID=$!
+  for i in $(seq 1 40); do
+    kill -0 "$LEGACY_PID" 2>/dev/null || break
+    sleep 0.5
+  done
+  STILL_RUNNING=0
+  if kill -0 "$LEGACY_PID" 2>/dev/null; then
+    STILL_RUNNING=1
+    kill "$LEGACY_PID" 2>/dev/null || true
+  fi
+  set +e
+  wait "$LEGACY_PID" 2>/dev/null
+  STATUS=$?
+  set -e
+  OUTPUT="$(cat "$OUT_FILE")"
+  rm -f "$OUT_FILE"
+  echo "$OUTPUT" | sed 's/^/    /'
+  echo ""
+  if [ "$STILL_RUNNING" = 0 ] && [ "$STATUS" -ne 0 ] && echo "$OUTPUT" | grep -q "older than 0.36.0"; then
+    ok "The daemon refused the pre-0.36.0 layout (exit $STATUS) — nothing is running"
+    echo "  ./setup-demo.sh (or ./run-ui.sh) resets to the normal fixture."
+    exit 0
+  fi
+  cleanup
+  err "Expected the daemon to refuse with the upgrade message (exit $STATUS)"
+  exit 1
+fi
 
 # ─── Start Daemon ─────────────────────────────────────────────────────
 

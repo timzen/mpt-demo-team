@@ -32,7 +32,7 @@ mpt-demo-team/
 │   │   │   └── nightly-test-run/workdef.md            # Scheduled (parent: schedule); no persona
 │   │   └── schedules/             # cron parents (fire their child WorkDefs)
 │   │       └── nightly-test-run.json                  # cron 0 2 * * *
-│   ├── team-legacy/        # Pre-persona team (context/, triage.md, in_progress.md): ./setup-demo.sh --legacy
+│   ├── team-legacy/        # A pre-0.36.0 layout the daemon refuses (paused, backlog/, draft: true, triage.md): --legacy
 │   └── tracker/
 │       └── tracker.json    # Seed issues for the demo-tracker plugin (DEMO-1, DEMO-2; DEMO-3 triage-mode)
 ├── plugins/
@@ -116,19 +116,17 @@ persona chip on its Team row, Queue row, Watch header and the task's Runs shows
 the persona its run recorded at claim (`GET /api/agents` → `persona`, and
 `persona` on every WorkItem).
 
-**The legacy layout (migration).** `fixtures/team-legacy/` is a team in the
-pre-persona layout: `workflows/default/in_progress.md`, `triage.md`, and a
-`context/` library with a persona-tagged entry (`pair-programmer`), an entry
-attached to a story and to a Solitary task (`project-conventions`), and an
-unattached one (`release-checklist`); its demo-tracker runs in source-wide triage
-mode with no triage persona. `./setup-demo.sh --legacy` (or `./run-ui.sh
---legacy`) sets it up, and on its first start the daemon migrates it in place:
-personas `default-in-progress`, `triage` and `pair-programmer` (the state and
-`triage.persona` point at them); the attached entry inlined into the tasks'
-Additional Context; `context/` archived as `context.migrated/` (with a notice on
-the home page); and `sourcePersonas.demo-tracker.triagePersona` seeded with
-`triage`. A second start changes nothing. `run-e2e.sh` checks all of it first.
-(The SQLite `assistant_persona` step can't be shown from fixtures: no `state.db`.)
+**A pre-0.36.0 layout (refused).** my-pizza-team no longer migrates team layouts
+from before 0.36.0, the oldest version a team can upgrade from (its docs/DESIGN.md
+"Upgrading from before 0.36.0"): the daemon refuses to start on one, naming what it
+found, with "This team was last run on a version older than 0.36.0. Install
+my-pizza-team 0.36.x (`npm i -g my-pizza-team@0.36`), start it once to migrate,
+then upgrade again." `fixtures/team-legacy/` is such a team: a story with the old
+`paused` flag, a story file in `backlog/`, a `draft: true` WorkDef and a
+`triage.md` — plus `archived/old-story/story.json`, a nested folder-per-story
+leftover that must *not* be reported. `./run-ui.sh --legacy` sets it up
+(`./setup-demo.sh --legacy`), starts the daemon, shows the refusal and exits 0
+with nothing left running; `run-e2e.sh` checks the same first.
 
 ## Showcasing Pause, Directory Affinity & Standalone Work
 
@@ -370,7 +368,7 @@ source in the foreground — no leader, no worker:
 ./run-ui.sh            # set up fixtures + start the daemon (Ctrl+C to stop)
 ./run-ui.sh --restart  # stop the running daemon, re-run setup, start again
 ./run-ui.sh --clean    # stop a daemon started by this script
-./run-ui.sh --legacy   # the same on the pre-persona layout (watch it migrate)
+./run-ui.sh --legacy   # set up the pre-0.36.0 layout and watch the daemon refuse it
 ```
 
 Once the daemon is healthy it prints each plugin package's load status, its
@@ -391,12 +389,10 @@ To run the full end-to-end flow (daemon + leader + worker agent):
 ```
 
 This will:
-1. Check the **persona migration**: set up the legacy layout (`setup-demo.sh
-   --legacy`), start the daemon on it, and assert each step's result (state file,
-   `triage.md` and the persona-tagged entry → personas listed by `GET
-   /api/personas`; the triage-mode source's triage persona seeded; attached context
-   inlined, `context/` → `context.migrated/`, the notice on `/api/status`,
-   `/api/context` → 404); restart it and assert nothing changed
+1. Check the **pre-0.36.0 refusal**: set up the legacy layout (`setup-demo.sh
+   --legacy`), start the daemon on it, and assert it exits non-zero with the
+   upgrade message, names every finding (and not the nested `archived/old-story/`
+   leftover), changes no file and leaves nothing listening
 2. Set up the demo fixtures (`setup-demo.sh`) and start the MPT daemon from
    `../my-pizza-team` source
 3. Check the demo-tracker plugin: loaded, all three issues mirrored and enqueued, and

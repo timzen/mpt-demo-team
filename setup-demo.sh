@@ -23,16 +23,16 @@
 # package plugins/mpt-personas-demo, and per-source personas for the tracker.
 # Project knowledge lives in the project (fixtures/project/AGENTS.md).
 #
-# --legacy sets up fixtures/team-legacy/ instead: an old-layout team (a context
-# library with a persona-tagged entry and attached entries, a workflow state
-# .md file, triage.md, a triage-mode source with no triage persona) that the
-# daemon migrates to personas the first time it starts on it. run-e2e.sh uses
-# it to check the migration, then resets to the normal fixture.
+# --legacy sets up fixtures/team-legacy/ instead: a team in a pre-0.36.0 layout
+# (a story's `paused` flag, a backlog/ story file, a `draft: true` WorkDef,
+# triage.md — plus a nested archived/<id>/story.json leftover that must NOT
+# count). my-pizza-team refuses to start on it, with the "install 0.36.x first"
+# message. ./run-ui.sh --legacy and run-e2e.sh use it to show the refusal.
 #
 # Usage:
 #   ./setup-demo.sh           # Reset demo/ (keeps installed plugin packages)
 #   ./setup-demo.sh --fresh   # Reset demo/ and clear the plugin package cache too
-#   ./setup-demo.sh --legacy  # Reset demo/ with the pre-persona team layout (migration demo)
+#   ./setup-demo.sh --legacy  # Reset demo/ with a pre-0.36.0 team layout (the daemon refuses it)
 #
 
 set -euo pipefail
@@ -80,7 +80,7 @@ echo "   ✓ demo/project/ created"
 echo "📁 Setting up team directory..."
 cp -R "$FIXTURES_DIR/$TEAM_FIXTURE" "$SCRIPT_DIR/demo/team/.my-pizza-team"
 if [ "$TEAM_FIXTURE" = "team-legacy" ]; then
-  echo "   ✓ demo/team/.my-pizza-team/ created from fixtures/team-legacy (pre-persona layout; migrated on first start)"
+  echo "   ✓ demo/team/.my-pizza-team/ created from fixtures/team-legacy (a pre-0.36.0 layout; the daemon refuses it)"
 else
   echo "   ✓ demo/team/.my-pizza-team/ created"
 fi
@@ -183,16 +183,15 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 if [ "$TEAM_FIXTURE" = "team-legacy" ]; then
-  echo "🕰  Legacy layout (fixtures/team-legacy) — what MPT migrates on first start:"
-  echo "   • workflows/default/in_progress.md   → persona default-in-progress (+ workflow.json \"persona\")"
-  echo "   • triage.md                          → persona triage (+ config triage.persona)"
-  echo "   • context/pair-programmer.md (tagged persona) → persona pair-programmer"
-  echo "   • context/project-conventions.md (attached)   → inlined into its tasks' Additional Context"
-  echo "   • context/ → context.migrated/ (release-checklist.md, unattached, stays there; a notice says so)"
-  echo "   • the triage-mode demo-tracker gets sourcePersonas.demo-tracker.triagePersona = triage"
+  echo "🕰  Pre-0.36.0 layout (fixtures/team-legacy) — what the daemon reports, and refuses to start on:"
+  echo "   • stories/add-user-auth.json          the pre-pending \"paused\" flag"
+  echo "   • backlog/polish-ui-theme.json        a story file in the old backlog/"
+  echo "   • tasks/add-user-auth-1/workdef.md    \"draft: true\" (renamed \"pending: true\")"
+  echo "   • triage.md                           replaced by a triage persona"
+  echo "   (archived/old-story/story.json, a nested leftover, is not reported)"
   echo ""
-  echo "Start the daemon (./run-ui.sh is the normal fixture — use mpt start or the command above),"
-  echo "then look at Config → Personas and $TEAM_DIR_PATH. ./setup-demo.sh resets to the normal fixture."
+  echo "Start the daemon (./run-ui.sh --legacy, or the command above) to see it refuse with the"
+  echo "\"install my-pizza-team 0.36.x first\" message. ./setup-demo.sh resets to the normal fixture."
   exit 0
 fi
 echo "📋 Story: \"Add User Authentication\" (worked with the \"Demo coder\" persona — personas/demo-coder.md)"

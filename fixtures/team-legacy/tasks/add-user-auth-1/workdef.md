@@ -1,19 +1,17 @@
 ---
-title: Create auth module with password hashing and token generation
+title: "Create the auth module"
 parentKind: story
 parentId: add-user-auth
+directory: "__DEMO_PROJECT__"
+draft: true
 ---
 ## Goal
 
-Create src/auth.ts with functions: hashPassword(plain) -> hashed,
-verifyPassword(plain, hashed) -> boolean, generateToken(userId) -> jwt string,
-verifyToken(token) -> payload | null. Use simple implementations (crypto
-built-ins, no external deps). Add tests in tests/auth.test.ts.
+Add src/auth.ts with password hashing and token helpers.
 
 ## Acceptance Criteria
 
-- Passwords MUST NOT be stored or logged in plaintext.
-- verifyToken MUST return null for a tampered or expired token.
-- tests/auth.test.ts MUST cover hash round-trip and token verify/reject.
+- `npm test` passes.
 
 ## Additional Context
+

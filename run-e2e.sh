@@ -2,9 +2,9 @@
 #
 # run-e2e.sh — End-to-end test run for MPT.
 #
-# First checks the persona migration on the pre-persona team layout
-# (./setup-demo.sh --legacy: start the daemon, check what it migrated, restart it
-# to prove the migration is idempotent). Then sets up the demo, starts the
+# First checks the daemon refuses a pre-0.36.0 team layout (./setup-demo.sh
+# --legacy: it must exit non-zero with the "install 0.36.x first" message and
+# change nothing). Then sets up the demo, starts the
 # daemon, checks the persona library, the persona packages and the tracker's
 # per-source / per-item personas (each run's prompt and recorded persona),
 # launches a Pi leader, and spawns a worker agent to execute tasks.
@@ -168,72 +168,47 @@ echo "  🍕 MPT End-to-End Test Run"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# ─── Persona migration (the legacy layout) ───────────────────────────
+# ─── A pre-0.36.0 layout is refused ──────────────────────────────────
 #
-# fixtures/team-legacy is a pre-persona team (my-pizza-team docs/DESIGN.md
-# "Migration: on load, lossless, idempotent"): a workflow state .md file,
-# triage.md, a context library (a persona-tagged entry, an entry attached to a
-# story and to a Solitary task, an unattached one), and the demo-tracker in
-# source-wide triage mode with no triage persona. Start the daemon on it, check
-# each step's result, then restart it and check the second start changes nothing.
+# fixtures/team-legacy is a team in a pre-0.36.0 layout (my-pizza-team
+# docs/DESIGN.md "Upgrading from before 0.36.0"): a story's `paused` flag, a
+# backlog/ story file, a `draft: true` WorkDef and triage.md — plus a nested
+# archived/<id>/story.json leftover that must not count. The daemon must exit
+# non-zero with the "install 0.36.x first" message, naming what it found, and
+# leave the files (and the port) as they were.
 
-log "Checking the persona migration on the legacy layout (./setup-demo.sh --legacy)..."
+log "Checking the daemon refuses the pre-0.36.0 layout (./setup-demo.sh --legacy)..."
 MPT_DEMO_NO_LOCAL_PLUGINS=1 "$SCRIPT_DIR/setup-demo.sh" --legacy > /dev/null
 LEGACY_TEAM="$TEAM_DIR/.my-pizza-team"
-start_daemon
-
-python3 - "$LEGACY_TEAM" <<'PY' || { err "The legacy team wasn't migrated as expected; see $DAEMON_LOG"; exit 1; }
-import json, os, sys
-team = sys.argv[1]
-def read(p): return open(os.path.join(team, p)).read()
-def gone(p): return not os.path.exists(os.path.join(team, p))
-def fail(m): print(f"  ✗ {m}", file=sys.stderr); sys.exit(1)
-cfg = json.loads(read("config.json"))
-wf = json.loads(read("workflows/default/workflow.json"))
-# 1. the workflow state file → persona <wf>-<state>, selected by the state
-state = [s for s in wf["states"] if s["name"] == "in_progress"][0]
-if state.get("persona") != "default-in-progress": fail(f"in_progress state persona: {state.get('persona')}")
-if not gone("workflows/default/in_progress.md"): fail("in_progress.md is still there")
-if "Run tests with `npm test`" not in read("personas/default-in-progress.md"): fail("default-in-progress lost the state file's text")
-# 2. triage.md → persona triage + config triage.persona
-if (cfg.get("triage") or {}).get("persona") != "triage": fail(f"triage.persona: {cfg.get('triage')}")
-if not gone("triage.md"): fail("triage.md is still there")
-# 3. the triage-mode source keeps what it ran with: the team's triage persona
-if (cfg.get("sourcePersonas") or {}).get("demo-tracker", {}).get("triagePersona") != "triage": fail(f"sourcePersonas: {cfg.get('sourcePersonas')}")
-# 4. the persona-tagged context entry → a team persona
-if "pair programmer" not in read("personas/pair-programmer.md"): fail("pair-programmer persona missing")
-# 6. attached context inlined into Additional Context (the story's onto its task, and the task's own); attachments dropped
-for t in ("add-user-auth-1", "audit-project-dependencies"):
-    md = read(f"tasks/{t}/workdef.md")
-    if "### Reference: Project Conventions (from the former context library, `project-conventions`)" not in md: fail(f"{t}: project-conventions wasn't inlined")
-    if "Error responses:" not in md: fail(f"{t}: the inlined entry lost its text")
-    if "contextRefs" in md: fail(f"{t}: contextRefs is still there")
-if "context" in json.loads(read("stories/add-user-auth.json")): fail("the story still has context")
-# 7. context/ archived (with a README), nothing deleted
-if not gone("context"): fail("context/ is still there")
-archived = sorted(os.listdir(os.path.join(team, "context.migrated")))
-if archived != ["README.md", "pair-programmer.md", "project-conventions.md", "release-checklist.md"]: fail(f"context.migrated/: {archived}")
-PY
-LEGACY_PERSONAS=$(curl -sf "$DAEMON_URL/api/personas" | json_field "' '.join(sorted(p['id'] for p in d['personas'] if p['origin']['kind'] == 'team'))")
-[ "$LEGACY_PERSONAS" = "default-in-progress pair-programmer triage" ] || { err "GET /api/personas after the migration lists team personas '$LEGACY_PERSONAS'"; exit 1; }
-LEGACY_NOTICE=$(curl -sf "$DAEMON_URL/api/status" | json_field "' | '.join(n['message'] for n in d.get('notices', []))")
-case "$LEGACY_NOTICE" in
-  *"context library was removed"*"1 unattached entry is in context.migrated/"*) ;;
-  *) err "No context-library notice on /api/status (got: '$LEGACY_NOTICE')"; exit 1 ;;
-esac
-[ "$(http_code "$DAEMON_URL/api/context")" = "404" ] || { err "/api/context isn't gone (404)"; exit 1; }
-
-# Idempotent: a second start changes no migrated file.
 legacy_snapshot() {
-  (cd "$LEGACY_TEAM" && find config.json personas workflows stories tasks/add-user-auth-1/workdef.md tasks/audit-project-dependencies/workdef.md context.migrated* -type f -print0 | sort -z | xargs -0 md5sum)
+  (cd "$LEGACY_TEAM" && find . -type f -print0 | sort -z | xargs -0 md5sum)
 }
-BEFORE_RESTART=$(legacy_snapshot)
-stop_daemon
-start_daemon
-AFTER_RESTART=$(legacy_snapshot)
-[ "$BEFORE_RESTART" = "$AFTER_RESTART" ] || { err "The migration isn't idempotent: a restart changed files"; diff <(echo "$BEFORE_RESTART") <(echo "$AFTER_RESTART") >&2 || true; exit 1; }
-stop_daemon
-ok "Migration: state file, triage.md, tagged entry → personas; triage-mode source seeded; context inlined + archived; notice; 410; idempotent"
+BEFORE_REFUSAL=$(legacy_snapshot)
+set +e
+LEGACY_OUTPUT=$(cd "$MPT_SOURCE" && TEAM_DIR="$LEGACY_TEAM" PORT=$DAEMON_PORT node daemon/main.ts 2>&1)
+LEGACY_STATUS=$?
+set -e
+echo "$LEGACY_OUTPUT" >> "$DAEMON_LOG"
+fail_legacy() { err "$1"; echo "$LEGACY_OUTPUT" | sed 's/^/    /' >&2; exit 1; }
+[ "$LEGACY_STATUS" -ne 0 ] || fail_legacy "The daemon started on the pre-0.36.0 layout (exit 0)"
+for expected in \
+  "This team was last run on a version older than 0.36.0" \
+  "npm i -g my-pizza-team@0.36" \
+  "stories/add-user-auth.json" \
+  "backlog/polish-ui-theme.json" \
+  "tasks/add-user-auth-1/workdef.md" \
+  "triage.md"; do
+  case "$LEGACY_OUTPUT" in
+    *"$expected"*) ;;
+    *) fail_legacy "The refusal doesn't mention '$expected'" ;;
+  esac
+done
+case "$LEGACY_OUTPUT" in
+  *"archived/old-story"*) fail_legacy "The refusal reports the nested archived/old-story/ leftover" ;;
+esac
+[ "$(legacy_snapshot)" = "$BEFORE_REFUSAL" ] || fail_legacy "The refused start changed the team's files"
+! lsof -ti :$DAEMON_PORT >/dev/null 2>&1 || fail_legacy "Something is listening on port $DAEMON_PORT after the refusal"
+ok "Pre-0.36.0 layout refused (exit $LEGACY_STATUS): upgrade message, every finding named, nested leftover ignored, nothing written"
 
 # ─── Setup Demo ──────────────────────────────────────────────────────
 

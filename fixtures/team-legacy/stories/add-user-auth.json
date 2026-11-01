@@ -1,12 +1,12 @@
 {
   "id": "add-user-auth",
   "title": "Add User Authentication",
-  "description": "Add a basic authentication system to the todo API. Users should be able to register, login, and access protected endpoints with a token.",
+  "description": "Add a basic authentication system to the todo API.",
   "status": "open",
   "dependsOn": [],
   "directory": "__DEMO_PROJECT__",
   "workflow": "default",
-  "context": ["project-conventions"],
+  "paused": true,
   "tasks": [
     { "id": "add-user-auth-1", "status": "todo" }
   ]
