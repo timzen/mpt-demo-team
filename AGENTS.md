@@ -118,7 +118,7 @@ relative to the team dir (`../../../plugins/mpt-source-demo-tracker`), with
 - **Settings UI:** it declares a `configSchema` + `preview`, and `init` re-reads
   `ctx.options()` (idempotent) — so Config → Sources edits, previews and saves it live
 - `run-e2e.sh` first checks the persona migration on `fixtures/team-legacy` (files, `GET
-  /api/personas`, the notice, 410 on `/api/context`, idempotent on restart); then the persona
+  /api/personas`, the notice, 404 on `/api/context`, idempotent on restart); then the persona
   library (team/built-in/package listed, package personas read-only, Used by), DEMO-1 (per-item
   override) and DEMO-2 (source default) prompts + recorded WorkItem persona (claimed by a throwaway
   agent, completed, reopened in the tracker file), DEMO-3's per-source triage persona, and the

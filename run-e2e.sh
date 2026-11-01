@@ -221,7 +221,7 @@ case "$LEGACY_NOTICE" in
   *"context library was removed"*"1 unattached entry is in context.migrated/"*) ;;
   *) err "No context-library notice on /api/status (got: '$LEGACY_NOTICE')"; exit 1 ;;
 esac
-[ "$(http_code "$DAEMON_URL/api/context")" = "410" ] || { err "/api/context isn't 410 Gone"; exit 1; }
+[ "$(http_code "$DAEMON_URL/api/context")" = "404" ] || { err "/api/context isn't gone (404)"; exit 1; }
 
 # Idempotent: a second start changes no migrated file.
 legacy_snapshot() {

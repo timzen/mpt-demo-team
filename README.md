@@ -396,7 +396,7 @@ This will:
    `triage.md` and the persona-tagged entry → personas listed by `GET
    /api/personas`; the triage-mode source's triage persona seeded; attached context
    inlined, `context/` → `context.migrated/`, the notice on `/api/status`,
-   `/api/context` → 410); restart it and assert nothing changed
+   `/api/context` → 404); restart it and assert nothing changed
 2. Set up the demo fixtures (`setup-demo.sh`) and start the MPT daemon from
    `../my-pizza-team` source
 3. Check the demo-tracker plugin: loaded, all three issues mirrored and enqueued, and
