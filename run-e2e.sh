@@ -15,10 +15,20 @@
 #   - the Pi extension installed (`mpt setup`, or `pi install /path/to/my-pizza-team/harnesses/pi`)
 #   - `node` 24+ available (runs the daemon from source; plugins need Node's module hooks)
 #   - `tmux` available (for agent spawning)
+#   - with --terminal herdr: `herdr` 0.9.5+ on PATH
 #
 # Usage:
-#   ./run-e2e.sh          # Run the full E2E flow
-#   ./run-e2e.sh --clean  # Clean up any running processes and exit
+#   ./run-e2e.sh                   # Run the full E2E flow (agents in tmux, the default)
+#   ./run-e2e.sh --terminal herdr  # The same with the team's terminal set to herdr
+#                                  # (also MPT_E2E_TERMINAL=herdr)
+#   ./run-e2e.sh --clean           # Clean up any running processes and exit
+#
+# --terminal herdr switches the demo team to herdr through PUT /api/config (what
+# Config → General → Terminal does) before the assistant starts, and back to tmux
+# on exit. It never touches your own herdr: the daemon gets a private config dir
+# ($XDG_CONFIG_HOME in a temp dir, your other ~/.config entries linked in) and a
+# named herdr session (herdrSession: mpt-demo-e2e); the herdr server it starts is
+# stopped and the temp dir removed on exit.
 #
 
 set -euo pipefail
@@ -33,6 +43,35 @@ DAEMON_PORT=7438
 DAEMON_URL="http://localhost:$DAEMON_PORT"
 TMUX_SESSION="mpt-demo"
 PIDFILE="$TEAM_DIR/.my-pizza-team/daemon.pid"
+
+# The team's terminal for this run: tmux (default) or herdr.
+TERMINAL="${MPT_E2E_TERMINAL:-tmux}"
+CLEAN_ONLY=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --clean) CLEAN_ONLY=1 ;;
+    --terminal) shift; TERMINAL="${1:-}" ;;
+    --terminal=*) TERMINAL="${1#--terminal=}" ;;
+    *) echo "Unknown option $1 (try --terminal herdr or --clean)" >&2; exit 1 ;;
+  esac
+  shift
+done
+case "$TERMINAL" in
+  tmux|herdr) ;;
+  *) echo "Unknown terminal '$TERMINAL' (tmux or herdr)" >&2; exit 1 ;;
+esac
+
+# herdr only: a private herdr world for the daemon (see the header).
+HERDR_SESSION="mpt-demo-e2e"
+HERDR_HOME=""
+ATTACH_HINT="tmux attach -t $TMUX_SESSION"
+# Run a command in the private herdr world (every inherited HERDR_* dropped).
+in_demo_herdr() {
+  env -u HERDR_SOCKET_PATH -u HERDR_SESSION -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID \
+    XDG_CONFIG_HOME="$HERDR_HOME/config" XDG_STATE_HOME="$HERDR_HOME/state" \
+    HERDR_CONFIG_PATH="$HERDR_HOME/config/herdr/config.toml" "$@"
+}
+demo_herdr() { in_demo_herdr herdr --session "$HERDR_SESSION" "$@"; }
 
 # ─── Colors ───────────────────────────────────────────────────────────
 
@@ -76,16 +115,52 @@ cleanup() {
     ok "tmux session '$TMUX_SESSION' killed"
   fi
 
+  # Stop the private herdr server (its agents die with it) and remove its world.
+  if [ -n "$HERDR_HOME" ] && [ -d "$HERDR_HOME" ]; then
+    demo_herdr server stop >/dev/null 2>&1 || true
+    for i in $(seq 1 20); do
+      [ "$(demo_herdr status server --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('running'))" 2>/dev/null)" = "True" ] || break
+      sleep 0.5
+    done
+    pkill -f "herdr --session $HERDR_SESSION server" 2>/dev/null || true
+    rm -rf "$HERDR_HOME"
+    ok "herdr session '$HERDR_SESSION' stopped, $HERDR_HOME removed"
+  fi
+
   ok "Cleanup complete"
 }
 
-if [ "${1:-}" = "--clean" ]; then
+if [ "$CLEAN_ONLY" = "1" ]; then
   cleanup
   exit 0
 fi
 
-# Trap to cleanup on exit
+# PUT /api/config with `terminal` set to $1 ("" = unset = tmux), as the Config
+# page saves it; prints the HTTP code.
+put_terminal() {
+  curl -sf "$DAEMON_URL/api/config" | python3 -c "
+import sys, json
+b = json.load(sys.stdin)
+for k in ('featureUsage', 'featureSources', 'defaultNouns', 'agentsOnOtherTerminal'): b.pop(k, None)
+b['terminal'] = sys.argv[1] or None
+print(json.dumps(b))" "$1" | curl -s -o /dev/null -w "%{http_code}" -X PUT "$DAEMON_URL/api/config" -H "Content-Type: application/json" -d @-
+}
+
+# --terminal herdr: switch the team back to tmux (the default) through the API
+# before the daemon is stopped, and check it took.
+restore_terminal() {
+  curl -sf "$DAEMON_URL/health" >/dev/null 2>&1 || return 0
+  if [ "$(put_terminal "")" = "200" ] \
+    && [ "$(curl -sf "$DAEMON_URL/health" | json_field "d['terminal']" 2>/dev/null)" = "tmux" ]; then
+    ok "Terminal restored to tmux (PUT /api/config)"
+  else
+    warn "Couldn't restore terminal=tmux through the API (the next ./setup-demo.sh resets it anyway)"
+  fi
+}
+
+# Trap to cleanup on exit — also on Ctrl+C / kill, which would otherwise skip it.
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # ─── Pre-clean ────────────────────────────────────────────────────────
 
@@ -118,6 +193,24 @@ if ! command -v tmux &>/dev/null; then
   exit 1
 fi
 
+if [ "$TERMINAL" = "herdr" ]; then
+  if ! command -v herdr &>/dev/null; then
+    err "herdr not found (--terminal herdr). Install: https://herdr.dev"
+    exit 1
+  fi
+  HERDR_HOME=$(mktemp -d "${TMPDIR:-/tmp}/mpt-demo-herdr.XXXXXX")
+  mkdir -p "$HERDR_HOME/config/herdr" "$HERDR_HOME/state"
+  # Everything else the agents read from ~/.config (mpt's runtime.json, git, …) stays visible.
+  for entry in "${XDG_CONFIG_HOME:-$HOME/.config}"/*; do
+    [ -e "$entry" ] && [ "$(basename "$entry")" != "herdr" ] && ln -s "$entry" "$HERDR_HOME/config/"
+  done
+  # bash as the pane shell (no zsh first-run prompts), no background network checks.
+  printf '[terminal]\ndefault_shell = "/bin/bash"\n[update]\nversion_check = false\nmanifest_check = false\n' \
+    > "$HERDR_HOME/config/herdr/config.toml"
+  ATTACH_HINT="XDG_CONFIG_HOME=$HERDR_HOME/config herdr session attach $HERDR_SESSION"
+  ok "herdr $(herdr --version | awk '{print $2}'): private session '$HERDR_SESSION' under $HERDR_HOME"
+fi
+
 if [ ! -d "$MPT_SOURCE" ]; then
   err "my-pizza-team source not found at $MPT_SOURCE"
   exit 1
@@ -135,8 +228,15 @@ http_code() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
 # $DAEMON_LOG) and wait for /health. Sets DAEMON_PID.
 start_daemon() {
   cd "$MPT_SOURCE"
-  TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
-    node daemon/main.ts >> "$DAEMON_LOG" 2>&1 &
+  if [ "$TERMINAL" = "herdr" ]; then
+    # The daemon (and so the herdr server it starts, and every agent pane) lives
+    # in the private herdr world.
+    TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
+      in_demo_herdr node daemon/main.ts >> "$DAEMON_LOG" 2>&1 &
+  else
+    TEAM_DIR="$TEAM_DIR/.my-pizza-team" PORT=$DAEMON_PORT \
+      node daemon/main.ts >> "$DAEMON_LOG" 2>&1 &
+  fi
   DAEMON_PID=$!
   cd "$SCRIPT_DIR"
   for i in $(seq 1 30); do
@@ -217,6 +317,16 @@ log "Setting up demo fixtures..."
 # Without plugins.local.json (your own plugins; see ./try-plugin.sh), so e2e
 # runs against the fixtures only and stays deterministic.
 MPT_DEMO_NO_LOCAL_PLUGINS=1 "$SCRIPT_DIR/setup-demo.sh" > /dev/null
+if [ "$TERMINAL" = "herdr" ]; then
+  # herdrSession is config.json-only (the Config page doesn't edit it); `terminal`
+  # itself is switched through the API below.
+  python3 - "$TEAM_DIR/.my-pizza-team/config.json" "$HERDR_SESSION" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg["herdrSession"] = sys.argv[2]
+json.dump(cfg, open(sys.argv[1], "w"), indent=2)
+PY
+fi
 ok "Demo fixtures in place"
 
 # ─── Start Daemon ────────────────────────────────────────────────────
@@ -585,6 +695,21 @@ ok "Back on: fixture settings restored, DEMO-1..3 back and re-queued (E2E-1 stay
 # harness's `leader` template (`pi -a --ppt-lead …`). It is idempotent: a second
 # POST answers already-running and never opens a second window.
 
+# ─── The team's terminal ─────────────────────────────────────────────
+#
+# --terminal herdr: switch it the way Config → General → Terminal does (PUT
+# /api/config with `terminal`); /health must then report herdr, reachable, in the
+# private session. It is switched back to tmux on exit (restore_terminal).
+
+if [ "$TERMINAL" = "herdr" ]; then
+  log "Switching the team's terminal to herdr (PUT /api/config, like Config → General)..."
+  [ "$(put_terminal herdr)" = "200" ] || { err "Setting terminal=herdr failed"; exit 1; }
+  trap 'restore_terminal; cleanup' EXIT
+  HERDR_HEALTH=$(curl -sf "$DAEMON_URL/health" | json_field "d['terminal'], (d.get('terminalStatus') or {}).get('available'), (d.get('terminalStatus') or {}).get('session')")
+  [ "$HERDR_HEALTH" = "herdr True $HERDR_SESSION" ] || { err "/health after the switch: $HERDR_HEALTH"; exit 1; }
+  ok "Terminal: herdr (session '$HERDR_SESSION', available) — /health agrees"
+fi
+
 log "Checking /health says the assistant is startable..."
 STARTABLE=$(curl -sf "$DAEMON_URL/health" | python3 -c "import sys,json; s=json.load(sys.stdin).get('assistantStartable') or {}; print('ok' if s.get('ok') else f\"{s.get('reason')} | fix: {s.get('fix')}\")")
 [ "$STARTABLE" = "ok" ] || { err "The daemon can't start the assistant: $STARTABLE"; exit 1; }
@@ -598,7 +723,9 @@ if [ "$START_CODE" != "201" ] || [ "$START_STATUS" != "started" ]; then
   err "Starting the assistant failed ($START_CODE): $(echo "$START_RES" | head -n -1)"
   exit 1
 fi
-ok "Assistant started by the daemon in $TMUX_SESSION:leader (201 started)"
+START_TERMINAL=$(echo "$START_RES" | head -n -1 | json_field "d.get('terminal')")
+[ "$START_TERMINAL" = "$TERMINAL" ] || { err "The assistant started in '$START_TERMINAL', expected $TERMINAL"; exit 1; }
+ok "Assistant started by the daemon in $TMUX_SESSION:leader, in $TERMINAL (201 started)"
 
 AGAIN_RES=$(curl -s -w '\n%{http_code}' -X POST "$DAEMON_URL/api/assistant/start")
 AGAIN_CODE=$(echo "$AGAIN_RES" | tail -n1)
@@ -607,9 +734,16 @@ if [ "$AGAIN_CODE" != "200" ] || [ "$AGAIN_STATUS" != "already-running" ]; then
   err "A second start should be already-running, got ($AGAIN_CODE): $(echo "$AGAIN_RES" | head -n -1)"
   exit 1
 fi
-LEADER_WINDOWS=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | grep -cx leader || true)
+if [ "$TERMINAL" = "herdr" ]; then
+  # The team is the workspace labelled $TMUX_SESSION; count its tabs labelled leader.
+  WS_ID=$(demo_herdr workspace list | python3 -c "import sys,json; w=[w['workspace_id'] for w in json.load(sys.stdin)['result']['workspaces'] if w['label']=='$TMUX_SESSION']; print(w[0] if w else '')")
+  LEADER_WINDOWS=0
+  [ -z "$WS_ID" ] || LEADER_WINDOWS=$(demo_herdr tab list --workspace "$WS_ID" | python3 -c "import sys,json; print(len([t for t in json.load(sys.stdin)['result']['tabs'] if t['label']=='leader']))")
+else
+  LEADER_WINDOWS=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | grep -cx leader || true)
+fi
 [ "$LEADER_WINDOWS" = "1" ] || { err "Expected one leader window, found $LEADER_WINDOWS"; exit 1; }
-ok "Second start is idempotent (200 already-running, one leader window)"
+ok "Second start is idempotent (200 already-running, one leader window in $TERMINAL)"
 
 # Give leader time to connect and register
 log "Waiting for leader to connect..."
@@ -625,7 +759,7 @@ if [ "$AGENT_COUNT" -gt 0 ]; then
   ok "Assistant (leader) connected"
 else
   warn "The assistant may not have connected yet (no leader registered after 30s)"
-  warn "Check: tmux attach -t $TMUX_SESSION"
+  warn "Check: $ATTACH_HINT"
   warn "Daemon log: $DAEMON_LOG"
 fi
 
@@ -664,7 +798,7 @@ if [ "$CURRENT_AGENTS" -gt 0 ]; then
   ok "Worker '$WORKER_NAME' spawned by the daemon"
 else
   err "The daemon didn't spawn a worker within 30s (failed spawns: $DAEMON_URL/api/spawn-requests)"
-  err "Check: tmux attach -t $TMUX_SESSION"
+  err "Check: $ATTACH_HINT"
   err "Daemon log: $DAEMON_LOG"
   exit 1
 fi
@@ -690,7 +824,7 @@ done
 if [ -n "$WORKER_PERSONA" ]; then
   ok "In-flight persona: $WORKER_PERSONA"
 else
-  warn "The worker hasn't claimed work with a persona yet (check: tmux attach -t $TMUX_SESSION)"
+  warn "The worker hasn't claimed work with a persona yet (check: $ATTACH_HINT)"
 fi
 
 # ─── Status Summary ──────────────────────────────────────────────────
@@ -703,7 +837,7 @@ echo ""
 echo "  Daemon:    $DAEMON_URL (PID $DAEMON_PID)"
 echo "  Daemon log: $DAEMON_LOG"
 echo "  UI:        $DAEMON_URL/"
-echo "  tmux:      tmux attach -t $TMUX_SESSION"
+echo "  Terminal:  $TERMINAL — $ATTACH_HINT"
 echo ""
 echo "  Assistant: $TMUX_SESSION:leader (in $TEAM_DIR, started via POST /api/assistant/start)"
 echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
@@ -715,8 +849,8 @@ echo "  Personas:  $DAEMON_URL/config/personas (team demo-coder; packages mpt-pe
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "Attach to tmux to watch:"
-echo "  tmux attach -t $TMUX_SESSION"
+echo "Attach to watch:"
+echo "  $ATTACH_HINT"
 echo ""
 echo "Monitor via API:"
 echo "  curl $DAEMON_URL/api/status | python3 -m json.tool"

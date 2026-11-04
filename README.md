@@ -430,6 +430,17 @@ This will:
 
 Prerequisites: `pi`, `node` 24+, `tmux`, and the Pi extension installed (`mpt setup`).
 
+**The same run under herdr.** `./run-e2e.sh --terminal herdr` (or
+`MPT_E2E_TERMINAL=herdr`) runs the whole flow with the team's terminal set to
+[herdr](https://herdr.dev) (0.9.5+): before the assistant starts it switches
+`terminal` through `PUT /api/config`, as Config → General → Terminal does, and
+checks `/health` reports herdr; the assistant and the worker then open as tabs of
+the `mpt-demo` workspace, and the leader-window check counts herdr tabs. It never
+touches your own herdr: the daemon runs with a temp `XDG_CONFIG_HOME` (your other
+`~/.config` entries linked in) and `herdrSession: mpt-demo-e2e`. On exit it switches
+the team back to tmux through the API, stops that herdr server and removes the temp
+dir. The summary prints the `herdr session attach` command to watch it.
+
 The agents must load an extension that speaks the source daemon's protocol. If the
 installed one is older (a released `mpt` running your real team), don't replace
 it: give the demo its own tmux server and a Pi config dir whose `settings.json`
