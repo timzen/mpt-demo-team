@@ -7,7 +7,8 @@
 # change nothing). Then sets up the demo, starts the
 # daemon, checks the persona library, the persona packages and the tracker's
 # per-source / per-item personas (each run's prompt and recorded persona),
-# launches a Pi leader, and spawns a worker agent to execute tasks.
+# starts the Pi leader (the assistant) through POST /api/assistant/start — the
+# web UI's Start button — checks a second start is idempotent, and spawns a worker agent to execute tasks.
 #
 # Prerequisites:
 #   - `pi` installed globally (npm i -g @earendil-works/pi-coding-agent)
@@ -576,31 +577,44 @@ done
 rm -f "$SCRATCH_TRACKER"
 ok "Back on: fixture settings restored, DEMO-1..3 back and re-queued (E2E-1 stays archived)"
 
-# ─── Launch Pi Leader ─────────────────────────────────────────────────
+# ─── Start the assistant (the Pi leader) through the daemon ─────────
+#
+# Exactly what the web UI's "Start the assistant" button does: POST
+# /api/assistant/start. The daemon (the only terminal owner) opens the leader
+# window <session>:leader in the project dir (the team dir's parent) with the
+# harness's `leader` template (`pi -a --ppt-lead …`). It is idempotent: a second
+# POST answers already-running and never opens a second window.
 
-log "Launching Pi leader in tmux..."
+log "Checking /health says the assistant is startable..."
+STARTABLE=$(curl -sf "$DAEMON_URL/health" | python3 -c "import sys,json; s=json.load(sys.stdin).get('assistantStartable') or {}; print('ok' if s.get('ok') else f\"{s.get('reason')} | fix: {s.get('fix')}\")")
+[ "$STARTABLE" = "ok" ] || { err "The daemon can't start the assistant: $STARTABLE"; exit 1; }
+ok "assistantStartable: ok"
 
-# Create tmux session with leader window
-# Note: if tmux-resurrect/continuum is installed, starting the tmux server
-# may trigger session restoration. We add a brief delay to let that settle.
-tmux new-session -d -s "$TMUX_SESSION" -n "leader" -c "$TEAM_DIR"
-sleep 2
-
-# Verify session was created
-if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-  err "Failed to create tmux session '$TMUX_SESSION'"
+log "Starting the assistant (POST /api/assistant/start, like the UI's button)..."
+START_RES=$(curl -s -w '\n%{http_code}' -X POST "$DAEMON_URL/api/assistant/start")
+START_CODE=$(echo "$START_RES" | tail -n1)
+START_STATUS=$(echo "$START_RES" | head -n -1 | json_field "d.get('status')")
+if [ "$START_CODE" != "201" ] || [ "$START_STATUS" != "started" ]; then
+  err "Starting the assistant failed ($START_CODE): $(echo "$START_RES" | head -n -1)"
   exit 1
 fi
+ok "Assistant started by the daemon in $TMUX_SESSION:leader (201 started)"
 
-tmux send-keys -t "$TMUX_SESSION:leader" \
-  "pi --ppt-lead --ppt-daemon=$DAEMON_URL" Enter
-
-ok "Pi leader launched in tmux session '$TMUX_SESSION' window 'leader'"
+AGAIN_RES=$(curl -s -w '\n%{http_code}' -X POST "$DAEMON_URL/api/assistant/start")
+AGAIN_CODE=$(echo "$AGAIN_RES" | tail -n1)
+AGAIN_STATUS=$(echo "$AGAIN_RES" | head -n -1 | json_field "d.get('status')")
+if [ "$AGAIN_CODE" != "200" ] || [ "$AGAIN_STATUS" != "already-running" ]; then
+  err "A second start should be already-running, got ($AGAIN_CODE): $(echo "$AGAIN_RES" | head -n -1)"
+  exit 1
+fi
+LEADER_WINDOWS=$(tmux list-windows -t "$TMUX_SESSION" -F '#{window_name}' 2>/dev/null | grep -cx leader || true)
+[ "$LEADER_WINDOWS" = "1" ] || { err "Expected one leader window, found $LEADER_WINDOWS"; exit 1; }
+ok "Second start is idempotent (200 already-running, one leader window)"
 
 # Give leader time to connect and register
 log "Waiting for leader to connect..."
-for i in $(seq 1 20); do
-  AGENT_COUNT=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('agents',[])))" 2>/dev/null || echo "0")
+for i in $(seq 1 30); do
+  AGENT_COUNT=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; print(len([a for a in json.load(sys.stdin).get('agents',[]) if a['id'] == 'leader']))" 2>/dev/null || echo "0")
   if [ "$AGENT_COUNT" -gt 0 ]; then
     break
   fi
@@ -608,9 +622,9 @@ for i in $(seq 1 20); do
 done
 
 if [ "$AGENT_COUNT" -gt 0 ]; then
-  ok "Leader connected ($AGENT_COUNT agent(s) registered)"
+  ok "Assistant (leader) connected"
 else
-  warn "Leader may not have connected yet (no agents registered after 20s)"
+  warn "The assistant may not have connected yet (no leader registered after 30s)"
   warn "Check: tmux attach -t $TMUX_SESSION"
   warn "Daemon log: $DAEMON_LOG"
 fi
@@ -691,7 +705,7 @@ echo "  Daemon log: $DAEMON_LOG"
 echo "  UI:        $DAEMON_URL/"
 echo "  tmux:      tmux attach -t $TMUX_SESSION"
 echo ""
-echo "  Leader:    $TMUX_SESSION:leader (in $TEAM_DIR)"
+echo "  Assistant: $TMUX_SESSION:leader (in $TEAM_DIR, started via POST /api/assistant/start)"
 echo "  Worker:    $WORKER_NAME (in $PROJECT_DIR)"
 echo ""
 echo "  Story:     'Add User Authentication' (3 tasks)"

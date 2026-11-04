@@ -41,7 +41,7 @@ mpt-demo-team/
 ├── plugins.local.example.json     # Example overlay for your own plugins (see "Trying your own plugins")
 ├── try-plugin.sh           # Install (git/npm) + doctor a plugin, add it to plugins.local.json, bring the sandbox up
 ├── run-ui.sh               # Daemon only (no agents); --restart, --clean, --legacy
-├── run-e2e.sh              # Full end-to-end run (daemon + leader + worker)
+├── run-e2e.sh              # Full end-to-end run (daemon + assistant + worker)
 ├── .gitignore              # Ignores demo/, plugins.local.json and .plugin-packages/
 └── README.md
 ```
@@ -362,7 +362,8 @@ packages are kept; `./setup-demo.sh --fresh` clears them too.
 
 To browse the seeded board / tasks / schedule without spawning any agents, use
 `run-ui.sh`. It sets up the fixtures and starts the daemon from `../my-pizza-team`
-source in the foreground — no leader, no worker:
+source in the foreground — no assistant, no worker (the state a new team is in:
+the Welcome checklist and the Team tab offer **Start the assistant**):
 
 ```bash
 ./run-ui.sh            # set up fixtures + start the daemon (Ctrl+C to stop)
@@ -382,7 +383,7 @@ Prerequisites: `node` 24+ only (the UI is served prebuilt from `my-pizza-team/ui
 
 ## E2E Test Run
 
-To run the full end-to-end flow (daemon + leader + worker agent):
+To run the full end-to-end flow (daemon + assistant + worker agent):
 
 ```bash
 ./run-e2e.sh
@@ -417,13 +418,27 @@ This will:
    mirrors, a **disconnect** switches it off and archives them, and no sync runs while
    it's off; finally the fixture settings are restored, it's switched back on, and
    DEMO-1..3 come back and are re-queued
-7. Launch a Pi leader in a tmux session
+7. Start the **assistant** (the Pi leader) the way the web UI's **Start the
+   assistant** button does: `/health` reports `assistantStartable` ok, `POST
+   /api/assistant/start` answers 201 `started` and the daemon opens
+   `mpt-demo:leader` (`pi -a --ppt-lead …`), a second POST answers 200
+   `already-running` with still one leader window, and the leader registers
 8. Spawn a worker agent pointed at `demo/project/`, and wait (up to 2 minutes; a
    warning, not a failure) for its **in-flight persona** on `GET /api/agents`
 9. Monitor task progress, the tracker issues' statuses and each working
    teammate's persona until you Ctrl+C
 
 Prerequisites: `pi`, `node` 24+, `tmux`, and the Pi extension installed (`mpt setup`).
+
+The agents must load an extension that speaks the source daemon's protocol. If the
+installed one is older (a released `mpt` running your real team), don't replace
+it: give the demo its own tmux server and a Pi config dir whose `settings.json`
+lists `../my-pizza-team/harnesses/pi` instead of the managed extension. The tmux
+server started by the daemon inherits both variables, so every window gets them:
+
+```bash
+TMUX= TMUX_TMPDIR=/tmp/mpt-e2e-tmux PI_CODING_AGENT_DIR=/tmp/pi-dev-agent ./run-e2e.sh
+```
 
 To clean up running processes:
 ```bash
