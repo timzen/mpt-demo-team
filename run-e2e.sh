@@ -619,8 +619,8 @@ fi
 
 log "Requesting worker spawn in $PROJECT_DIR..."
 
-# Create a leader directive — the daemon (or, without tmux access, the leader)
-# realizes it. There is one leader, so the queue isn't keyed by host.
+# Create a spawn directive — the daemon realizes it (it is the only terminal
+# owner; one it can't realize is created failed, with the reason).
 SPAWN_RES=$(curl -sf -X POST "$DAEMON_URL/api/leader/directives" \
   -H "Content-Type: application/json" \
   -d "{\"action\": \"spawn\", \"params\": {\"cwd\": \"$PROJECT_DIR\", \"reason\": \"e2e-test\"}}")
@@ -633,9 +633,9 @@ if [ "$SPAWN_OK" != "True" ]; then
   exit 1
 fi
 
-ok "Spawn directive created — leader will pick it up"
+ok "Spawn directive created — the daemon will open the window"
 
-# Wait for the leader to spawn the worker
+# Wait for the daemon to spawn the worker
 log "Waiting for worker to appear..."
 for i in $(seq 1 30); do
   CURRENT_AGENTS=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; agents=json.load(sys.stdin).get('agents',[]); print(len([a for a in agents if a['id'] != 'leader']))" 2>/dev/null || echo "0")
@@ -647,9 +647,9 @@ done
 
 if [ "$CURRENT_AGENTS" -gt 0 ]; then
   WORKER_NAME=$(curl -sf "$DAEMON_URL/api/agents" 2>/dev/null | python3 -c "import sys,json; agents=json.load(sys.stdin).get('agents',[]); w=[a for a in agents if a['id'] != 'leader']; print(w[0]['name'] if w else 'unknown')" 2>/dev/null || echo "unknown")
-  ok "Worker '$WORKER_NAME' spawned by leader"
+  ok "Worker '$WORKER_NAME' spawned by the daemon"
 else
-  err "Leader didn't spawn a worker within 30s"
+  err "The daemon didn't spawn a worker within 30s (failed spawns: $DAEMON_URL/api/spawn-requests)"
   err "Check: tmux attach -t $TMUX_SESSION"
   err "Daemon log: $DAEMON_LOG"
   exit 1
